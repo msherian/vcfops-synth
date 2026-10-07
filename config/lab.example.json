@@ -1,0 +1,26 @@
+{
+  "operations": {
+    "fqdn": "ops-a.site-a.vcf.lab",
+    "username": "admin",
+    "authSource": "LOCAL",
+    "skipCertificateCheck": true,
+    "timeoutSeconds": 60
+  },
+  "adapterKind": {
+    "key": "VcfOpsSynth",
+    "name": "VCF Ops Synth"
+  },
+  "prefix": "Synth-",
+  "timeZone": "Europe/Dublin",
+  "intervalMinutes": 5,
+  "backfillDays": 30,
+  "paths": {
+    "data": "/data",
+    "state": "/data/state.json"
+  },
+  "liveLoad": {
+    "enabled": false,
+    "maxLoadVms": 6,
+    "maxUpsaPairs": 2
+  }
+}
