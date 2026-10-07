@@ -1,0 +1,8 @@
+.git
+.github
+data
+tests
+docs
+*.xlsx
+*.csv
+config/lab.json
