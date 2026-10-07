@@ -24,8 +24,7 @@ RUN apt-get update \
 # Modules go in the all-users scope so the unprivileged runtime user can load them.
 RUN pwsh -NoLogo -NoProfile -Command " \
         \$ErrorActionPreference = 'Stop'; \
-        Set-PSResourceRepository -Name PSGallery -Trusted; \
-        Install-PSResource -Name ImportExcel -Version '${IMPORTEXCEL_VERSION}' -Scope AllUsers -Quiet" \
+        Install-PSResource -Name ImportExcel -Version '${IMPORTEXCEL_VERSION}' -Scope AllUsers -TrustRepository -Quiet" \
  && groupadd --system synth \
  && useradd --system --gid synth --home-dir /home/synth --create-home synth \
  && mkdir -p /config /data \

@@ -28,9 +28,10 @@ jobs:
       - name: Install PSScriptAnalyzer and Pester
         shell: pwsh
         run: |
-          Set-PSResourceRepository -Name PSGallery -Trusted
-          Install-PSResource -Name PSScriptAnalyzer -Version '[1.23.0,2.0.0)' -Quiet
-          Install-PSResource -Name Pester -Version '[5.6.0,6.0.0)' -Quiet
+          # -TrustRepository instead of Set-PSResourceRepository: on a fresh runner the
+          # repository store file does not exist yet and Set-PSResourceRepository fails.
+          Install-PSResource -Name PSScriptAnalyzer -Version '[1.23.0,2.0.0)' -TrustRepository -Quiet
+          Install-PSResource -Name Pester -Version '[5.6.0,6.0.0)' -TrustRepository -Quiet
 
       - name: PSScriptAnalyzer
         shell: pwsh
