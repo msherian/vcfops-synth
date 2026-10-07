@@ -1,0 +1,4 @@
+VM,Powerstate,Name,Description,Date / time,Filename,Size MiB (vmsn),Size MiB (total),Quiesced,State,Annotation,Datacenter,Cluster,Host,Folder,VM ID,VM UUID,VI SDK Server
+app-pay-01,poweredOn,Before October patching,,2026-08-01 10:15:00,[vsan-prod] app-pay-01/app-pay-01-Snapshot1.vmsn,8,2048,False,poweredOn,Tier 1 payments front end,DC-Dublin,PROD-01,esx01.example.test,/Prod/Payments,vm-1001,4201aaaa-0000-0000-0000-000000001001,vc01.example.test
+dev-build-01,poweredOn,clean baseline,,2025-01-15 09:00:00,[vsan-dev] dev-build-01/dev-build-01-Snapshot2.vmsn,8,10240,False,poweredOn,Build agent,DC-Dublin,DEV-01,esx03.example.test,/Dev,vm-2001,4201aaaa-0000-0000-0000-000000002001,vc01.example.test
+dev-build-01,poweredOn,after toolchain update,,2025-06-20 14:30:00,[vsan-dev] dev-build-01/dev-build-01-Snapshot3.vmsn,8,4096,False,poweredOn,Build agent,DC-Dublin,DEV-01,esx03.example.test,/Dev,vm-2001,4201aaaa-0000-0000-0000-000000002001,vc01.example.test

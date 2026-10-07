@@ -16,9 +16,14 @@
         config            Validates lab.json and prints the merged settings (password never shown).
         connect-test      Signs in to VCF Operations and prints its version.
         plan              Validates settings and lists what each stage will do. Dry run.
+        import [source]   Reads an RVTools export into the inventory model.
+                          source: an .xlsx, or a folder of RVTools CSV files
+                          (default import.source in lab.json).
+                          --output <path>    where to write the model (default paths.inventory)
+                          --tiering <path>   tiering rules (default import.tiering)
+                          --no-anonymise     keep real names; only for exports you may share as is
 
     Commands still to come, by build phase:
-        import            Phase 2   RVTools export to inventory model
         seed, reset       Phase 3   Create and remove objects in VCF Operations
         backfill          Phase 4   Push generated history
         content           Phase 5-7 Groups, policies, alerts, dashboards
@@ -60,7 +65,6 @@ Import-Module $moduleRoot -Force
 $toolVersion = (Import-PowerShellDataFile -Path $moduleRoot).ModuleVersion
 
 $planned = [ordered]@{
-    'import'    = 2
     'seed'      = 3
     'reset'     = 3
     'backfill'  = 4
@@ -87,9 +91,34 @@ function ConvertTo-RedactedConfig {
     $copy
 }
 
+# Commands that read their own arguments; every other built command refuses them rather than ignore a typo.
+$takesArguments = @('import')
+
+function Read-ImportArgument {
+    param([string[]]$Argument)
+    $parsed = @{ Source = $null; Output = $null; Tiering = $null; Anonymise = $null }
+    for ($i = 0; $i -lt $Argument.Count; $i++) {
+        $arg = $Argument[$i]
+        switch -Regex ($arg) {
+            '^--(output|tiering)$' {
+                if ($i + 1 -ge $Argument.Count) { throw [System.ArgumentException]::new("$arg needs a path.") }
+                $parsed[(Get-Culture).TextInfo.ToTitleCase($Matches[1])] = $Argument[++$i]
+                break
+            }
+            '^--no-anonymi[sz]e$' { $parsed.Anonymise = $false; break }
+            '^--anonymi[sz]e$' { $parsed.Anonymise = $true; break }
+            '^-' { throw [System.ArgumentException]::new("Unknown option '$arg' for import.") }
+            default {
+                if ($parsed.Source) { throw [System.ArgumentException]::new("import takes one source; got '$($parsed.Source)' and '$arg'.") }
+                $parsed.Source = $arg
+            }
+        }
+    }
+    $parsed
+}
+
 try {
-    # No command built so far takes further arguments; refuse them rather than ignore a typo.
-    if ($Arguments -and $Command.ToLowerInvariant() -notin $planned.Keys) {
+    if ($Arguments -and $Command.ToLowerInvariant() -notin $planned.Keys -and $Command.ToLowerInvariant() -notin $takesArguments) {
         Write-Host "'$Command' takes no further arguments; got: $($Arguments -join ' '). Run 'help' for usage."
         exit 2
     }
@@ -140,7 +169,53 @@ try {
             Write-Host "Backfill:    $($config.backfillDays) days at $($config.intervalMinutes)-minute intervals, $samplesPerObject samples per metric per object"
             Write-Host "Live load:   $(if ($config.liveLoad.enabled) { "on, up to $($config.liveLoad.maxLoadVms) load VMs and $($config.liveLoad.maxUpsaPairs) UPSA pairs" } else { 'off' })"
             Write-Host ''
-            Write-Host 'No RVTools inventory is loaded yet (import arrives in Phase 2), so nothing would be created.'
+            if (Test-Path -LiteralPath $config.paths.inventory) {
+                $inventory = Get-SynthInventory -Path $config.paths.inventory
+                $objects = @($inventory.vms).Count + @($inventory.hosts).Count + @($inventory.clusters).Count + @($inventory.datastores).Count
+                Write-Host "Inventory:   $($config.paths.inventory), imported $($inventory.importedAt)"
+                Get-SynthInventorySummary -Inventory $inventory | ForEach-Object { Write-Host "             $_" }
+                Write-Host "Seed:        $objects objects, $(@($inventory.datacenters).Count) datacenters (Phase 3)"
+                Write-Host "History:     about $('{0:N0}' -f ($objects * $samplesPerObject)) samples per metric across all objects (Phase 4)"
+            }
+            else {
+                Write-Host "No inventory at $($config.paths.inventory) yet; run 'import' first, so nothing would be created."
+            }
+            exit 0
+        }
+
+        'import' {
+            try { $options = Read-ImportArgument -Argument $Arguments }
+            catch [System.ArgumentException] {
+                Write-Host "$($_.Exception.Message) Run 'help' for usage."
+                exit 2
+            }
+            $config = Get-SynthConfig -Path $ConfigPath
+            $source = if ($options.Source) { $options.Source } else { $config.import.source }
+            $output = if ($options.Output) { $options.Output } else { $config.paths.inventory }
+            $anonymise = if ($null -ne $options.Anonymise) { $options.Anonymise } else { $config.import.anonymise }
+
+            $tieringPath = if ($options.Tiering) { $options.Tiering } else { $config.import.tiering }
+            if ($options.Tiering -and -not (Test-Path -LiteralPath $tieringPath)) {
+                throw "Tiering file '$tieringPath' was not found."
+            }
+            if (-not (Test-Path -LiteralPath $tieringPath)) {
+                Write-Host "No tiering rules at $tieringPath, so every VM is Bronze. Start from config/tiering.example.json."
+            }
+            $rules = Get-SynthTieringRule -Path $tieringPath
+
+            $key = Get-SynthAnonymisationKey -DataPath $config.paths.data
+            $inventory = Import-SynthRvtools -Path $source -Key $key -TieringRules $rules -Anonymise:$anonymise
+            Save-SynthInventory -Inventory $inventory -Path $output
+
+            Write-Host "Imported $source to $output."
+            Get-SynthInventorySummary -Inventory $inventory | ForEach-Object { Write-Host "  $_" }
+            $skipped = @($inventory.report.skipped)
+            if ($skipped.Count) {
+                $reasons = $skipped | Group-Object { $_.reason } | ForEach-Object { "$($_.Count) $($_.Name)" }
+                Write-Host "Skipped $($skipped.Count) row(s): $($reasons -join ', ')."
+            }
+            foreach ($warning in $inventory.report.warnings) { Write-Host "Warning: $warning" }
+            if (-not $anonymise) { Write-Host 'Real names were kept. Do not share this inventory outside the customer.' }
             exit 0
         }
 

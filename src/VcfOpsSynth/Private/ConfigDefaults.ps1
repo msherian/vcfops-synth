@@ -24,8 +24,14 @@ function Get-SynthConfigDefault {
         intervalMinutes = 5
         backfillDays   = 30
         paths          = @{
-            data  = '/data'
-            state = '/data/state.json'
+            data      = '/data'
+            state     = '/data/state.json'
+            inventory = '/data/inventory.json'
+        }
+        import         = @{
+            source    = '/data/rvtools.xlsx'
+            tiering   = '/config/tiering.json'
+            anonymise = $true
         }
         liveLoad       = @{
             enabled      = $false

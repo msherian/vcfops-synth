@@ -1,0 +1,4 @@
+Name,Config status,Address,Accessible,Type,# VMs total,# VMs,Capacity MiB,Provisioned MiB,In Use MiB,Free MiB,Free %,SIOC enabled,# Hosts,Hosts,Cluster name,Object ID,VI SDK Server,VI SDK UUID
+vsan-prod,green,,True,vsan,5,5,4194304,2500000,1677722,2516582,60,False,2,"esx01.example.test, esx02.example.test",PROD-01,datastore-1,vc01.example.test,1111
+vsan-dev,green,,True,vsan,4,4,2097152,800000,1572864,524288,25,False,1,esx03.example.test,DEV-01,datastore-2,vc01.example.test,1111
+nfs-iso,green,nas01.example.test:/iso,True,NFS,0,0,1048576,100000,100000,948576,90,False,3,"esx01.example.test, esx02.example.test, esx03.example.test",,datastore-3,vc01.example.test,1111

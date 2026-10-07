@@ -1,0 +1,11 @@
+VM,Powerstate,Template,SRM Placeholder,Disk Key,Disk,Capacity MiB,Consumed MiB,Free MiB,Free %,Annotation,Datacenter,Cluster,Host,Folder,VM ID,VM UUID,VI SDK Server
+app-pay-01,poweredOn,False,False,2000,C:\,102400,61440,40960,40,Tier 1 payments front end,DC-Dublin,PROD-01,esx01.example.test,/Prod/Payments,vm-1001,4201aaaa-0000-0000-0000-000000001001,vc01.example.test
+app-pay-01,poweredOn,False,False,2001,D:\,204800,102400,102400,50,Tier 1 payments front end,DC-Dublin,PROD-01,esx01.example.test,/Prod/Payments,vm-1001,4201aaaa-0000-0000-0000-000000001001,vc01.example.test
+sql-pay-01,poweredOn,False,False,2002,/,51200,20480,30720,60,Tier 1 database,DC-Dublin,PROD-01,esx02.example.test,/Prod/Payments,vm-1002,4201aaaa-0000-0000-0000-000000001002,vc01.example.test
+sql-pay-01,poweredOn,False,False,2003,/var/opt/mssql,512000,400000,112000,22,Tier 1 database,DC-Dublin,PROD-01,esx02.example.test,/Prod/Payments,vm-1002,4201aaaa-0000-0000-0000-000000001002,vc01.example.test
+web-shop-01,poweredOn,False,False,2004,/,40960,10240,30720,75,,DC-Dublin,PROD-01,esx01.example.test,/Prod/Shop,vm-1003,4201aaaa-0000-0000-0000-000000001003,vc01.example.test
+batch-etl-01,poweredOn,False,False,2005,/,204800,81920,122880,60,Nightly ETL,DC-Dublin,PROD-01,esx02.example.test,/Prod/Batch,vm-1004,4201aaaa-0000-0000-0000-000000001004,vc01.example.test
+dev-build-01,poweredOn,False,False,2006,/,102400,25600,76800,75,Build agent,DC-Dublin,DEV-01,esx03.example.test,/Dev,vm-2001,4201aaaa-0000-0000-0000-000000002001,vc01.example.test
+dev-hot-01,poweredOn,False,False,2007,/,40960,36864,4096,10,Load test target,DC-Dublin,DEV-01,esx03.example.test,/Dev,vm-2005,4201aaaa-0000-0000-0000-000000002005,vc01.example.test
+lost-vm-01,poweredOn,False,False,2008,/,40960,9000,31960,78,,DC-Dublin,PROD-01,esx99.example.test,/Prod,vm-1005,4201aaaa-0000-0000-0000-000000001005,vc01.example.test
+tmpl-ubuntu-2404,poweredOff,True,False,2009,/,40960,3000,37960,93,,DC-Dublin,DEV-01,esx03.example.test,/Templates,vm-2003,4201aaaa-0000-0000-0000-000000002003,vc01.example.test
