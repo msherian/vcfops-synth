@@ -1,0 +1,7 @@
+# Local run data: RVTools exports, inventory models and state files can hold customer data
+/data/
+*.xlsx
+*.csv
+state*.json
+config/lab.json
+testResults.xml
