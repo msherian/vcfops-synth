@@ -38,7 +38,8 @@
     pwsh ./bin/vcfops-synth.ps1 config -ConfigPath ./config/lab.json
 
 .NOTES
-    Exit codes: 0 success, 1 failure, 2 unknown command, 3 command not built yet.
+    Exit codes: 0 success, 1 failure, 2 unknown command or unexpected arguments,
+    3 command not built yet.
 #>
 [CmdletBinding()]
 param(
@@ -87,6 +88,12 @@ function ConvertTo-RedactedConfig {
 }
 
 try {
+    # No command built so far takes further arguments; refuse them rather than ignore a typo.
+    if ($Arguments -and $Command.ToLowerInvariant() -notin $planned.Keys) {
+        Write-Host "'$Command' takes no further arguments; got: $($Arguments -join ' '). Run 'help' for usage."
+        exit 2
+    }
+
     switch ($Command.ToLowerInvariant()) {
         { $_ -in 'help', '-h', '--help' } {
             Show-Help

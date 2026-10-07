@@ -50,6 +50,12 @@ Describe 'vcfops-synth CLI' {
         $result.Output | Should -BeLike '*Phase 4*'
     }
 
+    It 'rejects arguments a command does not take' {
+        $result = Invoke-Cli @('version', 'extra')
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike '*takes no further arguments*extra*'
+    }
+
     It 'rejects an unknown command' {
         (Invoke-Cli @('frobnicate')).ExitCode | Should -Be 2
     }

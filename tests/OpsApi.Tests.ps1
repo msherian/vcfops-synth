@@ -1,4 +1,7 @@
 # Pester 5 tests for the Suite API client. Invoke-RestMethod is mocked; no lab needed.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'Test fixture password, not a secret.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Test helper that only builds an object.')]
+param()
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '../src/VcfOpsSynth/VcfOpsSynth.psd1') -Force

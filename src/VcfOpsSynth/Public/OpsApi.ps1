@@ -18,6 +18,7 @@ function Connect-SynthOps {
     .EXAMPLE
         Connect-SynthOps -Config (Get-SynthConfig)
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Ops is the product name, VCF Operations, not a plural.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][hashtable]$Config,
@@ -76,6 +77,7 @@ function Disconnect-SynthOps {
     .SYNOPSIS
         Releases the current token on the server and forgets it locally.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Ops is the product name, VCF Operations, not a plural.')]
     [CmdletBinding(SupportsShouldProcess)]
     param()
 

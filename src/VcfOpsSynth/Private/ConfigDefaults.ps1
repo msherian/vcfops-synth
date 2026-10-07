@@ -70,6 +70,7 @@ function Get-SynthSecret {
         which is how a Docker secret is mounted (/run/secrets/<name>). Returns $null
         when neither is set, so callers decide whether a password is needed.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The password arrives as plain text from an environment variable or Docker secret file; this is where it becomes a SecureString.')]
     [CmdletBinding()]
     [OutputType([securestring])]
     param()

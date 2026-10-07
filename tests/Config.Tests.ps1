@@ -1,5 +1,7 @@
 # Pester 5 tests for configuration loading and validation. No lab needed.
 #   Invoke-Pester -Path ./tests
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Test helper that writes into the Pester TestDrive.')]
+param()
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '../src/VcfOpsSynth/VcfOpsSynth.psd1') -Force
