@@ -24,9 +24,16 @@
                           --perf <path>      LiveOptics VMware workbook: per-VM and per-host
                                              averages and peaks (default import.performance)
                           --no-anonymise     keep real names; only for exports you may share as is
+        seed              Creates the inventory in VCF Operations as VMWARE objects under a vCenter
+                          adapter instance: datacenters, clusters, hosts, datastores, distributed
+                          switches and port groups, VM folders and VMs, each with every metric and
+                          property of its kind's rubric, linked to its synthetic parents only.
+                          Objects that already exist by name are skipped.
+                          --adapter <name>   vCenter adapter instance (default seed.adapterInstance)
+                          --dry-run          build and summarise the plan; create nothing
 
     Commands still to come, by build phase:
-        seed, reset       Phase 3   Create and remove objects in VCF Operations
+        reset             Phase 3   Remove the objects seed created
         backfill          Phase 4   Push generated history
         content           Phase 5-7 Groups, policies, alerts, dashboards
         feed, scenario    Phase 6   Live metrics and scenario overlays
@@ -67,7 +74,6 @@ Import-Module $moduleRoot -Force
 $toolVersion = (Import-PowerShellDataFile -Path $moduleRoot).ModuleVersion
 
 $planned = [ordered]@{
-    'seed'      = 3
     'reset'     = 3
     'backfill'  = 4
     'content'   = 5
@@ -94,7 +100,7 @@ function ConvertTo-RedactedConfig {
 }
 
 # Commands that read their own arguments; every other built command refuses them rather than ignore a typo.
-$takesArguments = @('import')
+$takesArguments = @('import', 'seed')
 
 function Read-ImportArgument {
     param([string[]]$Argument)
@@ -116,6 +122,25 @@ function Read-ImportArgument {
                 if ($parsed.Source) { throw [System.ArgumentException]::new("import takes one source; got '$($parsed.Source)' and '$arg'.") }
                 $parsed.Source = $arg
             }
+        }
+    }
+    $parsed
+}
+
+function Read-SeedArgument {
+    param([string[]]$Argument)
+    if (-not $Argument) { $Argument = @() }
+    $parsed = @{ Adapter = $null; DryRun = $false }
+    for ($i = 0; $i -lt $Argument.Count; $i++) {
+        $arg = $Argument[$i]
+        switch -Regex ($arg) {
+            '^--adapter$' {
+                if ($i + 1 -ge $Argument.Count) { throw [System.ArgumentException]::new("$arg needs an adapter instance name.") }
+                $parsed.Adapter = $Argument[++$i]
+                break
+            }
+            '^--dry-run$' { $parsed.DryRun = $true; break }
+            default { throw [System.ArgumentException]::new("Unknown option '$arg' for seed.") }
         }
     }
     $parsed
@@ -224,6 +249,47 @@ try {
             foreach ($warning in $inventory.report.warnings) { Write-Host "Warning: $warning" }
             if (-not $anonymise) { Write-Host 'Real names were kept. Do not share this inventory outside the customer.' }
             exit 0
+        }
+
+        'seed' {
+            try { $options = Read-SeedArgument -Argument $Arguments }
+            catch [System.ArgumentException] {
+                Write-Host "$($_.Exception.Message) Run 'help' for usage."
+                exit 2
+            }
+            $config = Get-SynthConfig -Path $ConfigPath
+            $adapterName = if ($options.Adapter) { $options.Adapter } else { $config.seed.adapterInstance }
+            if (-not $adapterName) { throw 'No vCenter adapter instance to seed under. Set seed.adapterInstance in lab.json or pass --adapter <name>.' }
+            $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
+            $inventory = Get-SynthInventory -Path $config.paths.inventory
+            $rubrics = Get-SynthRubric -Path $rubricPath
+
+            $null = Connect-SynthOps -Config $config
+            try {
+                $target = Resolve-SynthSeedTarget -Name $adapterName
+                $plan = New-SynthSeedPlan -Inventory $inventory -Rubric $rubrics -VcId $target.VcId -Prefix $config.prefix
+                $objects = @($plan.objects)
+                Write-Host "Seed plan for adapter instance $adapterName ($($target.AdapterInstanceId)), vCenter $($target.VcId):"
+                $objects | Group-Object { $_.kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count)" }
+                $edges = ($plan.links | ForEach-Object { @($_.children).Count } | Measure-Object -Sum).Sum
+                Write-Host "  $($objects.Count) objects, $edges links"
+                Write-Host "  Not created (no VMWARE kind): $($plan.skipped.standardNetworks) standard port groups, $($plan.skipped.standardSwitches) standard switches, $($plan.skipped.resourcePools) resource pools"
+                if ($options.DryRun) {
+                    Write-Host 'Dry run: nothing was created.'
+                    exit 0
+                }
+
+                $result = Invoke-SynthSeed -Plan $plan -AdapterInstanceId $target.AdapterInstanceId
+                foreach ($kind in $result.created.Keys) {
+                    Write-Host "  $($kind): $($result.created[$kind]) created, $($result.existing[$kind]) already there"
+                }
+                Write-Host "  $($result.links) links made"
+                foreach ($failure in $result.failed) { Write-Host "Failed: $failure" }
+            }
+            finally {
+                Disconnect-SynthOps -Confirm:$false
+            }
+            exit $(if ($result.failed.Count) { 1 } else { 0 })
         }
 
         { $planned.Contains($_) } {

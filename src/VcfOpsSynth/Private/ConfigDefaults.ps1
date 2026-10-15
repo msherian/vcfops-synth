@@ -35,6 +35,12 @@ function Get-SynthConfigDefault {
             performance = $null
             anonymise   = $true
         }
+        seed           = @{
+            # The vCenter adapter instance the synthetic tree goes under, by name (vc-mgmt-a).
+            adapterInstance = ''
+            # Rubrics captured from the lab; empty means <paths.data>/rubrics.
+            rubrics         = ''
+        }
         liveLoad       = @{
             enabled      = $false
             maxLoadVms   = 6

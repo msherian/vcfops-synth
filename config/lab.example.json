@@ -25,6 +25,10 @@
     "performance": null,
     "anonymise": true
   },
+  "seed": {
+    "adapterInstance": "vc-mgmt-a",
+    "rubrics": ""
+  },
   "liveLoad": {
     "enabled": false,
     "maxLoadVms": 6,
