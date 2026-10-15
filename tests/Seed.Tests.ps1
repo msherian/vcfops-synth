@@ -201,11 +201,11 @@ Describe 'New-SynthSeedPlan' {
 
     It 'tags every object as synthetic, rubric or not' {
         foreach ($o in $script:plan.objects) {
-            Get-Entry $o.properties 'summary|tag' | Should -Be '[<vcfops-synth-synthetic>]' -Because "$($o.kind) $($o.name)"
+            Get-Entry $o.properties 'summary|tag' | Should -Be '[vcfops-synth-synthetic]' -Because "$($o.kind) $($o.name)"
             (Get-Entry $o.properties 'summary|tagJson' | ConvertFrom-Json).name | Should -Be 'synthetic'
         }
         $other = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001' -Tag @{ Category = 'Lab'; Name = 'Fake' }
-        Get-Entry (Get-PlanObject $other 'vm-3333000001').properties 'summary|tag' | Should -Be '[<Lab-Fake>]'
+        Get-Entry (Get-PlanObject $other 'vm-3333000001').properties 'summary|tag' | Should -Be '[Lab-Fake]'
     }
 
     It 'puts standard switches and port groups under the custom adapter kind with inventory properties' {
@@ -380,7 +380,7 @@ Describe 'New-SynthSeedPlan' {
     It 'writes several tags, the synthetic marker and the project' {
         $tagged = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001' -Tag @(@{ Category = 'vcfops-synth'; Name = 'synthetic' }, @{ Category = 'Project'; Name = '2026.0001 Example Ltd - OPP-1' })
         $o = Get-PlanObject $tagged 'vm-3333000001'
-        Get-Entry $o.properties 'summary|tag' | Should -Be '[<vcfops-synth-synthetic>, <Project-2026.0001 Example Ltd - OPP-1>]'
+        Get-Entry $o.properties 'summary|tag' | Should -Be '[vcfops-synth-synthetic, Project-2026.0001 Example Ltd - OPP-1]'
         @(Get-Entry $o.properties 'summary|tagJson' | ConvertFrom-Json).category | Should -Be @('vcfops-synth', 'Project')
     }
 
@@ -535,7 +535,7 @@ Describe 'Invoke-SynthSeed' {
         $tools.Contains('data') | Should -BeFalse
         @($vmStats | Where-Object { $_.statKey -eq 'cpu|usage_average' })[0].data | Should -Be @(12.5)
         $vssProps = @($script:posts | Where-Object { $_.Path -eq 'resources/ops-StandardSwitch-vss-ffff000002/properties' })[0].Body.'property-content'
-        @($vssProps | Where-Object { $_.statKey -eq 'summary|tag' })[0].values | Should -Be @('[<vcfops-synth-synthetic>]')
+        @($vssProps | Where-Object { $_.statKey -eq 'summary|tag' })[0].values | Should -Be @('[vcfops-synth-synthetic]')
         @($script:posts | Where-Object { $_.Path -like 'resources/ops-esx-existing/*' -and $_.Path -notlike '*/relationships/*' }).Count | Should -Be 0
     }
 

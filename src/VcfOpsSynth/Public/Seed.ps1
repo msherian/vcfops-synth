@@ -125,7 +125,8 @@ function New-SynthSeedPlan {
     $prepared = @{}
     $tags = @($Tag | Where-Object { $_ -and $_.Category -and $_.Name })
     $tagSet = [ordered]@{
-        'summary|tag'     = "[$(($tags | ForEach-Object { "<$($_.Category)-$($_.Name)>" }) -join ', ')]"
+        # Operations strips anything in angle brackets from pushed values, so the vCenter adapter's <Category-Tag> form cannot be used.
+        'summary|tag'     = "[$(($tags | ForEach-Object { "$($_.Category)-$($_.Name)" }) -join ', ')]"
         'summary|tagJson' = ConvertTo-Json -Compress -InputObject @($tags | ForEach-Object { [ordered]@{ category = [string]$_.Category; name = [string]$_.Name } })
     }
     $context = Get-SynthDerivationContext -Inventory $Inventory
