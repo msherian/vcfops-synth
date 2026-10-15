@@ -33,7 +33,7 @@ RUN pwsh -NoLogo -NoProfile -Command " \
 WORKDIR /opt/vcfops-synth
 COPY src ./src
 COPY bin ./bin
-COPY config/lab.example.json ./config/lab.example.json
+COPY config/lab.example.json config/tiering.example.json ./config/
 
 ENV VCFOPS_SYNTH_CONFIG=/config/lab.json \
     POWERSHELL_TELEMETRY_OPTOUT=1 \

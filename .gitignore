@@ -2,6 +2,9 @@
 /data/
 *.xlsx
 *.csv
+# except the invented RVTools export the tests read
+!tests/fixtures/**/*.csv
 state*.json
 config/lab.json
+config/tiering.json
 testResults.xml

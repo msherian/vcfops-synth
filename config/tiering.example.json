@@ -1,0 +1,17 @@
+{
+  "defaultTier": "Bronze",
+  "rules": [
+    { "match": { "cluster": "^PROD", "annotation": "tier ?1|critical" }, "tier": "Gold" },
+    { "match": { "cluster": "^PROD" }, "tier": "Silver" },
+    { "match": { "attribute:AppOwner": "^Payments$" }, "application": "Payments" },
+    { "match": { "attribute:AppOwner": "^Shop$" }, "application": "Web Shop" },
+    { "match": { "name": "batch|etl" }, "profile": "batch", "application": "Data Platform" },
+    { "match": { "name": "^sql|db" }, "profile": "steady" }
+  ],
+  "profiles": {
+    "idleCpuPct": 5,
+    "idleMemPct": 10,
+    "saturatedCpuPct": 80,
+    "saturatedMemPct": 85
+  }
+}

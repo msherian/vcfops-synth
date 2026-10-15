@@ -101,6 +101,16 @@ function Test-SynthConfig {
     try { $null = [System.TimeZoneInfo]::FindSystemTimeZoneById($Config.timeZone) }
     catch { "timeZone '$($Config.timeZone)' is not a known time zone; use an IANA name such as Europe/Dublin." }
 
+    foreach ($name in 'data', 'state', 'inventory') {
+        if ([string]::IsNullOrWhiteSpace($Config.paths[$name])) { "paths.$name is empty." }
+    }
+    if ([string]::IsNullOrWhiteSpace($Config.import.source)) {
+        'import.source is empty; name the RVTools xlsx, or a folder of its CSV files.'
+    }
+    if ($Config.import.anonymise -isnot [bool]) {
+        'import.anonymise must be true or false.'
+    }
+
     $live = $Config.liveLoad
     if ($live.maxLoadVms -lt 0 -or $live.maxUpsaPairs -lt 0) { 'liveLoad caps cannot be negative.' }
 }
