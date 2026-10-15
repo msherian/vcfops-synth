@@ -15,8 +15,9 @@ Run on 15 October 2026 against the Holodeck lab (`ops-a.site-a.mars.local`, sign
 | 0.3 | Policies through the API? | Yes |
 | 0.3 | Views through the API? | Import yes; list unsupported only; no delete |
 | 0.3 | Dashboards through the API? | Import yes; no list or delete |
-| 0.4 | Importer on a real RVTools export of vc-mgmt-a | Not run yet; waiting for an export |
-| 0.5 | Synthetic objects identical to a real one (rubric) | Yes for stat keys and properties; collection status and relationships still differ |
+| 0.4 | Importer on a real RVTools export of vc-mgmt-a | Yes, after a fix for empty sheets; networks, virtual disks and folders are not imported yet |
+| 0.5 | Synthetic objects identical to a real one (rubric) | Yes for stat keys and properties; collection status still differs |
+| 0.6 | A synthetic vCenter tree with VMs under synthetic parents | Yes; relationships survive vCenter collection |
 
 ### Set-up
 
@@ -77,7 +78,27 @@ Decision for Phase 5 to 7: groups, super metrics and policies can be fully manag
 
 ### 0.4 RVTools import on vc-mgmt-a
 
-Not run yet. Needs an RVTools export of vc-mgmt-a; the run will be `pwsh ./bin/vcfops-synth.ps1 import <export.xlsx>`.
+Export: RVTools 4.7.1.4 command line on the jump host, `RVTools.exe -u administrator@vsphere.local -p _RVToolsV3PWD<DPAPI blob> -s vc-mgmt-a.site-a.mars.local -c ExportAll2xlsx -d <data folder> -f rvtools-vc-mgmt-a.xlsx`. The password is encrypted with DPAPI for the current user, as `RVToolsPasswordEncryption.ps1` does, so it never appears in clear on a command line. The export (27 sheets, 131 KB) stays in the gitignored `data/` folder.
+
+Import: `pwsh ./bin/vcfops-synth.ps1 import data/rvtools-vc-mgmt-a.xlsx` first failed with `Cannot bind argument to parameter 'Header' because it is null`. The `vSnapshot` sheet has a header row and no data, because vc-mgmt-a has no snapshots, and the xlsx reader returned null headers for it. Fixed in `Read-SynthRvtoolsSheet` (commit "Read xlsx tabs that have a header row but no data", on the Phase 2 branch). After the fix:
+
+```
+15 VMs (15 powered on) on 4 hosts in 1 cluster, 1 datastore, 1 datacenter
+Tiers: Bronze 15
+Profiles: business-hours 15
+Source: xlsx, RVTools 4.7.1.4, anonymised
+Skipped 4 row(s): 4 template.
+```
+
+All 92 Pester tests pass with the fix.
+
+Gaps against the new requirement that the synthetic estate mirrors the import, networks included. The export holds these sheets, but the inventory model does not use them yet:
+
+- `vNetwork` (VM network adapters and their port groups), `dvSwitch`, `dvPort`, `vSwitch` and `vPort` (switches and port groups), and `vSC_VMK` (host VMkernel ports): needed for synthetic networks and the VM to port group links.
+- `vDisk` (virtual disks): needed to expand the per-disk metrics (`virtualDisk:scsiX:Y|...`) in each VM's rubric. `vPartition`, which is imported, holds guest file systems, not virtual disks.
+- `vNIC` and `vHBA` (host adapters), `vRP` (resource pools) and the VM folder column of `vInfo`.
+
+Phase 3 extends the importer with these before seeding.
 
 ### 0.5 Rubrics: synthetic objects that match real ones
 
@@ -107,12 +128,27 @@ Test: created `Synth-spike05-vm01` as `VMWARE/VirtualMachine` under the vc-mgmt-
 Still different from a real VM:
 
 1. **Collection status.** A live real VM shows `STARTED/DATA_RECEIVING` from its vCenter adapter. The synthetic VM shows `NONE` from the vCenter adapter and `DATA_RECEIVING` from the "VCF Operations API" adapter instance, because that is where pushed data arrives. The UI shows this as a collection state, and it cannot be changed through the API.
-2. **Relationships.** A real VM has a host, datastore, folder and port group as parents. The synthetic VM has none. Giving it real parents changes the real objects' roll-ups; the alternative is a fully synthetic tree (Synth- datacenter, cluster, hosts, datastores) under the same adapter instance.
+2. **Relationships.** A real VM has a host, datastore, folder and port group as parents; the synthetic VM had none. Decided: the toolset builds a fully synthetic tree from the RVTools import, and real lab objects serve only as rubrics. Proven in 0.6.
 3. **Freshness.** One pushed sample makes the keys exist, but the values go stale unless a live feed (Phase 6) keeps pushing every collection cycle.
 
 Note on the reference VM: auto-platform-a-nn4ks went `NOT_EXISTING` at 17:08 UTC during the test, because the VCF Automation platform replaced that node VM. The rubric was captured before that, but the toolset should pick its rubric source from objects in `STARTED/DATA_RECEIVING` state and capture again when the source disappears.
 
+### 0.6 A synthetic tree under the vCenter adapter instance
+
+Created, under the vc-mgmt-a adapter instance and each filled from its rubric: `Synth-spike06-dc` (Datacenter), `Synth-spike06-cl` (ClusterComputeResource), `Synth-spike06-esx01` (HostSystem, with `isPingEnabled`), `Synth-spike06-ds01` (Datastore, with `DataStrorePath`, spelt that way in the identifier) and `Synth-spike06-pg01` (DistributedVirtualPortgroup). Identifiers: `VMEntityObjectID` in the vCenter style (`host-90601`, `domain-c90601` and so on), the real vCenter's `VMEntityVCID`, and `VMEntityName`.
+
+Linked with `POST /api/resources/{parentId}/relationships/children`, body `{"uuids":["<childId>"]}`, which returns 204: datacenter > cluster > host > VM, datacenter > datastore, host > datastore, datastore > VM, port group > VM.
+
+After two vCenter collection cycles (13 minutes):
+
+- Every link was still there (`GET /api/resources/{id}/relationships/parents` and `/children`). The vCenter adapter does not remove relationships it did not create.
+- All six objects were `STARTED` and GREEN.
+- Operations also placed the synthetic datastore in its own `vSAN Datastores` group, as it does for real vSAN datastores, so derived membership works from the pushed properties.
+- Stat keys: cluster 235 of 237 and host 245 of 249. The missing ones are text-valued metrics (`configuration|dasConfig|ha_cluster_error`, `health|reports|hostd|state` and similar), whose latest value has no number. They have to be pushed with `values` instead of `data`. Phase 3 handles them.
+
 ### Left behind
+
+Kept on purpose for an overnight soak (does the vCenter adapter leave them alone?), then removed with `DELETE /api/resources/{id}`: `Synth-spike05-vm01` and the six `Synth-spike06-*` objects.
 
 These two could not be removed through the API and are still in the lab:
 
