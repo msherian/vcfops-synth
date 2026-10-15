@@ -8,7 +8,7 @@ Run on 15 October 2026 against `ops-a.site-a.mars.local` (VCF Operations 9.1.1.0
 | --- | --- | --- |
 | 0.0 | Can the toolset reach and sign in to Ops? | **Yes** |
 | 0.1 | Can resources be created under the native `VMWARE` kind? | **Yes, but only through the vCenter adapter instance.** The custom `VcfOpsSynth` kind works through the adapter kind endpoint. |
-| 0.2 | Do stats with 1, 7 and 30 days of history land and read back? | **Yes**, all three. Writes are asynchronous: expect 5 to 15 minutes before they read back. |
+| 0.2 | Do stats with 1, 7 and 30 days of history land and read back? | **Yes**, all three. Writes are asynchronous: expect 5 to 20 minutes before they read back. |
 | 0.3 | Can super metrics, policies, views and dashboards be imported through the API? | **Super metrics: yes**, both direct and through content import. **Dashboards, views, policies: the content import endpoint accepts them, but import of hand-built items is not proven yet** (see 0.3 notes). |
 | 0.4 | Does the importer run on a real RVTools export of `vc-mgmt-a`? | **Not run yet.** Waiting for an export. |
 
@@ -46,8 +46,8 @@ Pushes to `POST api/resources/stats/adapterkinds/VcfOpsSynth?disableAnalyticsPro
 
 Notes:
 
-- **Writes are queued.** A 200 means accepted, not stored. The 1-day and 7-day series read back within about 10 minutes, and the 30-day series after about 14 minutes. Stat keys show up in `GET api/resources/{id}/statkeys` before their points do. The toolset should push, then verify by polling, rather than reading back straight away.
-- **Batch size.** 8,640 points for one key in one call was accepted and stored in full, so batching by time is not needed at this scale. A follow-up test pushed 30 days as five 7-day chunks, plus a 14-day single push and a 1-day push dated 29 to 30 days back. The keys were registered, but the points had not read back when this was written. Until that is confirmed, the toolset should cap one call at about 10,000 points and verify.
+- **Writes are queued.** A 200 means accepted, not stored. The 1-day and 7-day series read back within about 10 minutes, the 30-day series after about 14 minutes, and the follow-up pushes after about 17. Stat keys show up in `GET api/resources/{id}/statkeys` before their points do. The toolset should push, then verify by polling, rather than reading back straight away.
+- **Batch size.** 8,640 points for one key in one call was accepted and stored in full, so batching by time is not needed at this scale. A follow-up test pushed 30 days as five 7-day chunks (8,640 points read back), a 14-day single push (4,032) and a 1-day push dated 29 to 30 days back (288). All three read back in full about 17 minutes after the push, so chunking and single calls behave the same and data a month old is kept. The toolset should cap one call at about 10,000 points per key (the largest size tested) and allow up to 20 minutes for verification.
 - `GET api/resources/stats/latest` shows only the newest sample of each key. It is not a check that history landed.
 - Not tested: pushing stats onto the `VMWARE` object through `POST api/resources/{id}/stats`.
 
