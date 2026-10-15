@@ -294,7 +294,8 @@ try {
             finally {
                 Disconnect-SynthOps -Confirm:$false
             }
-            exit $(if ($result.failed.Count) { 1 } else { 0 })
+            # Stale names mean Ops does not match the plan, so later phases should not carry on as if it did.
+            exit $(if ($result.failed.Count -or $result.renamed.Count) { 1 } else { 0 })
         }
 
         { $planned.Contains($_) } {
