@@ -67,6 +67,7 @@ function New-SynthSeedPlan {
     .EXAMPLE
         $plan = New-SynthSeedPlan -Inventory $inventory -Rubric $rubrics -VcId $vcId
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds a plan in memory; Invoke-SynthSeed makes the changes.')]
     [CmdletBinding()]
     [OutputType([hashtable])]
     param(

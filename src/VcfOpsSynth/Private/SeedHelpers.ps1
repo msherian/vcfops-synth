@@ -293,9 +293,11 @@ function ConvertTo-SynthScrubbedValue {
     if ($Value -isnot [string] -or -not $Value) { return $Value }
     if ($Key -match '\|discoveryProtocol\|') { return '-' }
     if ($Key -notmatch '(?i)ip_?address|ipv6|mgmt_address|mac_address|dns|ntp|gateway') { return $Value }
-    $text = [regex]::Replace($Value, '\b(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b', '00:00:00:00:00:00')
-    $text = [regex]::Replace($text, '\b(?:\d{1,3}\.){3}\d{1,3}\b', '192.0.2.1')
-    [regex]::Replace($text, '\b(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}\b|\bfe80::[0-9A-Fa-f:]+', '2001:db8::1')
+    $text = [regex]::Replace($Value, '\b(?:\d{1,3}\.){3}\d{1,3}\b', '192.0.2.1')
+    # A MAC also reads as IPv6, so both go in one pass with the MAC tried first at each position.
+    [regex]::Replace($text, '\b(?<mac>(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})\b|\bfe80::[0-9A-Fa-f:]+|\b(?:[0-9A-Fa-f]{1,4}:{1,2}){2,7}[0-9A-Fa-f]{1,4}\b', {
+            param($m) if ($m.Groups['mac'].Success) { '00:00:00:00:00:00' } else { '2001:db8::1' }
+        })
 }
 
 function ConvertTo-SynthGuid {
