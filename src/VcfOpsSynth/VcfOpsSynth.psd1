@@ -16,6 +16,7 @@
         'Test-SynthTieringRule'
         'Get-SynthAnonymisationKey'
         'Import-SynthRvtools'
+        'Read-SynthLiveOptics'
         'Save-SynthInventory'
         'Get-SynthInventory'
         'Get-SynthInventorySummary'

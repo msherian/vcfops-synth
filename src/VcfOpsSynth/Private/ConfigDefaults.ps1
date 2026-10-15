@@ -29,9 +29,11 @@ function Get-SynthConfigDefault {
             inventory = '/data/inventory.json'
         }
         import         = @{
-            source    = '/data/rvtools.xlsx'
-            tiering   = '/config/tiering.json'
-            anonymise = $true
+            source      = '/data/rvtools.xlsx'
+            tiering     = '/config/tiering.json'
+            # Optional LiveOptics VMware workbook; empty means RVTools baselines only.
+            performance = $null
+            anonymise   = $true
         }
         liveLoad       = @{
             enabled      = $false

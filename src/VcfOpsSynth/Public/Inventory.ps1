@@ -18,14 +18,15 @@ function Import-SynthRvtools {
             NICs, HBAs and VMkernel adapters;
           - baselines from RVTools' single usage sample: VM CPU and memory use,
             guest disk use, host CPU and memory use, datastore use;
+          - with -Performance, LiveOptics averages and peaks per VM and host;
           - a tier, application and workload profile from the tiering rules.
 
         Templates and SRM placeholders are skipped. IP addresses, DNS names, MAC
         addresses and WWNs are never read. With -Anonymise, names of VMs, hosts,
         clusters, datacenters, datastores, distributed switches, networks,
         resource pools and folders become stable pseudonyms (vm-3f9a2c1d0b), and
-        annotations, snapshot names and partition paths are dropped. Tiering rules still see
-        the real values, because they run first.
+        annotations, snapshot names and partition paths are dropped. Tiering rules and the
+        LiveOptics join still see the real values, because they run first.
 
         Rows that cannot be used are listed in report.skipped and other problems
         in report.warnings, by tab and spreadsheet row, so the import never fails
@@ -43,8 +44,17 @@ function Import-SynthRvtools {
     .PARAMETER Anonymise
         Replace names with pseudonyms and drop free-text fields.
 
+    .PARAMETER Performance
+        LiveOptics rows from Read-SynthLiveOptics. VMs join on the vCenter
+        managed object ID, then on name; hosts on name. A VM with LiveOptics data
+        is profiled by its LiveOptics averages instead of the RVTools sample.
+
     .EXAMPLE
         $inventory = Import-SynthRvtools -Path ./data/rvtools.xlsx -Key $key -Anonymise
+
+    .EXAMPLE
+        $perf = Read-SynthLiveOptics -Path ./data/LiveOptics_VMWARE.xlsx
+        $inventory = Import-SynthRvtools -Path ./data/rvtools.xlsx -Key $key -Performance $perf -Anonymise
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'RVTools is the product name, not a plural.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Key', Justification = 'Used inside the newId script block, which the rule does not follow.')]
@@ -54,7 +64,8 @@ function Import-SynthRvtools {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][byte[]]$Key,
         [hashtable]$TieringRules,
-        [switch]$Anonymise
+        [switch]$Anonymise,
+        [hashtable]$Performance
     )
 
     if (-not $TieringRules) { $TieringRules = Get-SynthTieringRule }
@@ -149,6 +160,7 @@ function Import-SynthRvtools {
         $clusters[$clusterKey]
     }
 
+    $perfHostsUsed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $t = $tabs.vHost
     $rowNumber = 1
     foreach ($row in $t.Rows) {
@@ -185,6 +197,17 @@ function Import-SynthRvtools {
             baseline    = [ordered]@{
                 cpuUsagePct = ConvertTo-SynthPercent (ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'cpuUsagePct'))
                 memUsagePct = ConvertTo-SynthPercent (ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'memUsagePct'))
+                perf        = $null
+            }
+        }
+        if ($Performance) {
+            $lower = $name.ToLowerInvariant()
+            $perfRow = if ($Performance.HostsByName.ContainsKey($lower)) { $Performance.HostsByName[$lower] }
+            elseif ($Performance.HostsByName.ContainsKey($lower.Split('.')[0])) { $Performance.HostsByName[$lower.Split('.')[0]] }
+            else { $null }
+            if ($perfRow) {
+                $hosts[$hostKey].baseline.perf = $perfRow.Values
+                $null = $perfHostsUsed.Add($perfRow.Name)
             }
         }
         $hostsByName["$server|$($name.ToLowerInvariant())"] = $hosts[$hostKey]
@@ -530,7 +553,9 @@ function Import-SynthRvtools {
         })
     $vms = @{}
     $skippedKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $perfVmsUsed = [System.Collections.Generic.HashSet[object]]::new()
     $t = $tabs.vInfo
+    $singleServer = @($t.Rows | ForEach-Object { [string](Get-SynthRvCell $_ $t.Columns 'server') } | Sort-Object -Unique).Count -le 1
     $rowNumber = 1
     foreach ($row in $t.Rows) {
         $rowNumber++
@@ -686,13 +711,35 @@ function Import-SynthRvtools {
         $hwVersion = if ($tools) { ConvertTo-SynthText (Get-SynthRvCell $tools.Row $tools.Columns 'vmVersion') } else { $null }
         if (-not $hwVersion) { $hwVersion = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'hwVersion') }
 
+        # LiveOptics: the managed object ID is unique per vCenter, so it is trusted when the name agrees
+        # or the export covers one vCenter; otherwise the name must match exactly one row.
+        $perf = $null
+        if ($Performance) {
+            $vmIdValue = [string](Get-SynthRvCell $row $t.Columns 'vmId')
+            $byId = @(if ($vmIdValue -and $Performance.VmsById.ContainsKey($vmIdValue)) { $Performance.VmsById[$vmIdValue] })
+            $perfRow = $byId | Where-Object { $_.Name -ieq [string]$name } | Select-Object -First 1
+            if (-not $perfRow -and $byId.Count -eq 1 -and $singleServer) { $perfRow = $byId[0] }
+            if (-not $perfRow) {
+                $byName = @(if ($Performance.VmsByName.ContainsKey(([string]$name).ToLowerInvariant())) { $Performance.VmsByName[([string]$name).ToLowerInvariant()] })
+                if ($byName.Count -eq 1) { $perfRow = $byName[0] }
+            }
+            if ($perfRow) {
+                $perf = [ordered]@{ ioClass = $perfRow.IoClass }
+                foreach ($field in $perfRow.Values.Keys) { $perf[$field] = $perfRow.Values[$field] }
+                $null = $perfVmsUsed.Add($perfRow)
+            }
+        }
+
         $poweredOn = $powerState -eq 'poweredOn'
         $baseline = [ordered]@{
             cpuUsagePct    = if ($poweredOn -and $maxMhz -gt 0 -and $null -ne $usageMhz) { ConvertTo-SynthPercent ($usageMhz / $maxMhz * 100) } elseif (-not $poweredOn) { 0 } else { $null }
             memActivePct   = if ($poweredOn -and $sizeMiB -gt 0 -and $null -ne $activeMiB) { ConvertTo-SynthPercent ($activeMiB / $sizeMiB * 100) } elseif (-not $poweredOn) { 0 } else { $null }
             memConsumedPct = if ($poweredOn -and $sizeMiB -gt 0 -and $null -ne $consumedMiB) { ConvertTo-SynthPercent ($consumedMiB / $sizeMiB * 100) } elseif (-not $poweredOn) { 0 } else { $null }
             diskUsedPct    = if ($diskCapacity -gt 0) { ConvertTo-SynthPercent ($diskConsumed / $diskCapacity * 100) } else { $null }
+            perf           = $perf
         }
+        # LiveOptics averages over days describe a VM better than RVTools' single sample.
+        $classBaseline = if ($perf) { @{ cpuUsagePct = $perf.cpuAvgPct; memActivePct = $perf.memAvgPct } } else { $baseline }
 
         # Tier, application and profile, from the real values.
         $facts = @{}
@@ -706,7 +753,7 @@ function Import-SynthRvtools {
         $facts.annotation = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'annotation')
         $facts.guestOs = $guestOs
         $facts.powerState = $powerState
-        $assigned = Resolve-SynthVmClass -Fact $facts -Rule $compiled -TieringRules $TieringRules -Baseline $baseline -PoweredOn $poweredOn
+        $assigned = Resolve-SynthVmClass -Fact $facts -Rule $compiled -TieringRules $TieringRules -Baseline $classBaseline -PoweredOn $poweredOn
 
         $vm = [ordered]@{
             id              = $id
@@ -769,6 +816,25 @@ function Import-SynthRvtools {
         }
     }
 
+    $perfReport = $null
+    if ($Performance) {
+        $vmsWithPerf = @($vms.Values | Where-Object { $_.baseline.perf }).Count
+        $perfReport = [ordered]@{
+            vmsMatched     = $vmsWithPerf
+            vmsWithout     = $vms.Count - $vmsWithPerf
+            vmRowsUnused   = $Performance.Vms.Count - $perfVmsUsed.Count
+            hostsMatched   = @($hosts.Values | Where-Object { $_.baseline.perf }).Count
+            hostsWithout   = @($hosts.Values | Where-Object { -not $_.baseline.perf }).Count
+            hostRowsUnused = $Performance.Hosts.Count - $perfHostsUsed.Count
+        }
+        if ($perfReport.vmRowsUnused -gt 0) {
+            $report.warnings.Add("LiveOptics has $($perfReport.vmRowsUnused) VM row(s) that match no VM in the RVTools export; they were ignored.")
+        }
+        if ($perfReport.hostRowsUnused -gt 0) {
+            $report.warnings.Add("LiveOptics has $($perfReport.hostRowsUnused) host row(s) that match no host in the RVTools export; they were ignored.")
+        }
+    }
+
     $metadata = @{ rvtoolsVersion = $null; created = $null }
     if ($tabs.ContainsKey('vMetaData') -and $tabs.vMetaData.Rows.Count -gt 0) {
         $m = $tabs.vMetaData
@@ -789,6 +855,7 @@ function Import-SynthRvtools {
             exportedAt     = $metadata.created
             anonymised     = [bool]$Anonymise
             tiering        = if ($TieringRules.sourcePath) { Split-Path -Leaf $TieringRules.sourcePath } else { $null }
+            performance    = if ($Performance) { [ordered]@{ format = 'LiveOptics'; collectedOn = $Performance.CollectedOn } } else { $null }
         }
         datacenters   = @(& $sorted $datacenters)
         clusters      = @(& $sorted $clusters)
@@ -800,8 +867,9 @@ function Import-SynthRvtools {
         folders       = @(& $sorted $folders)
         vms           = @(& $sorted $vms)
         report        = [ordered]@{
-            warnings = @($report.warnings)
-            skipped  = @($report.skipped | ForEach-Object { [ordered]@{ tab = $_.tab; row = $_.row; reason = $_.reason } })
+            warnings    = @($report.warnings)
+            skipped     = @($report.skipped | ForEach-Object { [ordered]@{ tab = $_.tab; row = $_.row; reason = $_.reason } })
+            performance = $perfReport
         }
     }
 }
@@ -861,6 +929,10 @@ function Get-SynthInventorySummary {
 
     if (@($Inventory.networks).Count -or @($Inventory.resourcePools).Count) {
         "$(& $count $Inventory.networks 'network') on $(& $count $Inventory.switches 'switch' 'switches'), $(& $count $Inventory.resourcePools 'resource pool'), $(& $count $Inventory.folders 'folder')"
+    }
+    if ($Inventory.report.performance) {
+        $p = $Inventory.report.performance
+        "Performance: LiveOptics for $($p.vmsMatched) of $($p.vmsMatched + $p.vmsWithout) VMs and $($p.hostsMatched) of $($p.hostsMatched + $p.hostsWithout) hosts"
     }
 
     $tiers = foreach ($tier in Get-SynthTierName) {

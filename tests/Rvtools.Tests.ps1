@@ -273,6 +273,102 @@ Describe 'Anonymised import' {
     }
 }
 
+Describe 'LiveOptics performance' -Skip:(-not (Get-Module -ListAvailable -Name ImportExcel)) {
+    BeforeAll {
+        Import-Module ImportExcel -WarningAction SilentlyContinue
+        # An invented LiveOptics VMware workbook: a header-less Details sheet and the two performance sheets.
+        $script:liveOptics = Join-Path $TestDrive 'LiveOptics_000000_VMWARE_09_04_2026.xlsx'
+        @(
+            [pscustomobject]@{ P1 = 'Project Name'; P2 = 'Example Customer - Assessment' }
+            [pscustomobject]@{ P1 = 'Date'; P2 = '2026/09/04' }
+            [pscustomobject]@{ P1 = 'Owner'; P2 = 'Someone (someone@example.test)' }
+        ) | Export-Excel -Path $liveOptics -WorksheetName 'Details' -NoHeader
+        $vm = {
+            param($Name, $MobId, $CpuAvg, $CpuPeak, $MemAvg, $MemPeak)
+            [pscustomobject][ordered]@{
+                'VM Name' = $Name; 'MOB ID' = $MobId; 'Host' = 'esx01.example.test'; 'VM IO Classification' = 'Standard'
+                'Peak vCPU %' = $CpuPeak; 'Average vCPU %' = $CpuAvg; 'Peak Memory %' = $MemPeak; 'Avg Memory %' = $MemAvg
+                'Peak IOPS' = 900; 'Average IOPS' = 120; 'Peak Read IOPS' = 600; 'Peak Write IOPS' = 300; 'Avg Read IOPS' = 80; 'Avg Write IOPS' = 40
+                'Peak Read MB/s' = 40; 'Peak Write MB/s' = 20; 'Avg Read MB/s' = 4; 'Avg Write MB/s' = 2
+                'Peak Read Latency' = 12; 'Peak Write Latency' = 9; 'Avg Read Latency' = 1.5; 'Avg Write Latency' = 2.5
+            }
+        }
+        @(
+            & $vm 'app-pay-01' 'vm-1001' 30 90 40 60        # joined on the managed object ID and name
+            & $vm 'sql-pay-01-renamed' 'vm-1002' 50 95 70 80 # joined on the ID alone: one vCenter, one candidate
+            & $vm 'dev-build-01' 'vm-9999' 1 4 5 8          # joined on the name after the ID fails
+            & $vm 'dev-hot-01' 'vm-2005' 2 6 3 5            # LiveOptics says idle, RVTools' sample said saturated
+            & $vm 'ghost-vm' 'vm-7777' 10 20 10 20          # in no RVTools export
+        ) | Export-Excel -Path $liveOptics -WorksheetName 'VM Performance'
+        @(
+            [pscustomobject]@{ Host = 'esx01.example.test'; 'Peak CPU %' = 80; 'Average CPU %' = 35; 'Peak Memory %' = 75; 'Average Memory %' = 62; 'Peak IOPS' = 5000; 'Average IOPS' = 900; 'Peak Throughput MB/s' = 300; 'Avg Throughput MB/s' = 45; 'Peak Read Latency' = 8; 'Peak Write Latency' = 6; 'Avg Read Latency' = 1; 'Avg Write Latency' = 1.2 }
+            [pscustomobject]@{ Host = 'esx02'; 'Peak CPU %' = 70; 'Average CPU %' = 40; 'Peak Memory %' = 80; 'Average Memory %' = 70; 'Peak IOPS' = 4000; 'Average IOPS' = 800; 'Peak Throughput MB/s' = 250; 'Avg Throughput MB/s' = 40; 'Peak Read Latency' = 7; 'Peak Write Latency' = 5; 'Avg Read Latency' = 1; 'Avg Write Latency' = 1.1 }
+            [pscustomobject]@{ Host = 'esx77.example.test'; 'Peak CPU %' = 10; 'Average CPU %' = 5; 'Peak Memory %' = 10; 'Average Memory %' = 5; 'Peak IOPS' = 10; 'Average IOPS' = 1; 'Peak Throughput MB/s' = 1; 'Avg Throughput MB/s' = 1; 'Peak Read Latency' = 1; 'Peak Write Latency' = 1; 'Avg Read Latency' = 1; 'Avg Write Latency' = 1 }
+        ) | Export-Excel -Path $liveOptics -WorksheetName 'ESX Performance'
+
+        $script:perf = Read-SynthLiveOptics -Path $liveOptics
+        $script:inventory = Import-SynthRvtools -Path $script:fixture -Key $script:key -TieringRules $script:rules -Performance $perf
+    }
+
+    It 'reads the collection date but not the project or owner' {
+        $perf.CollectedOn | Should -Be '2026-09-04T00:00:00'
+        $inventory.source.performance.format | Should -Be 'LiveOptics'
+        $inventory.source.performance.collectedOn | Should -Be '2026-09-04T00:00:00'
+        $json = $inventory | ConvertTo-Json -Depth 20
+        $json | Should -Not -Match 'Example Customer'
+        $json | Should -Not -Match 'someone@example'
+    }
+
+    It 'joins VMs on the managed object ID, then on the name' {
+        (Get-Vm $inventory 'app-pay-01').baseline.perf.cpuAvgPct | Should -Be 30
+        (Get-Vm $inventory 'app-pay-01').baseline.perf.cpuPeakPct | Should -Be 90
+        (Get-Vm $inventory 'app-pay-01').baseline.perf.readLatencyAvgMs | Should -Be 1.5
+        (Get-Vm $inventory 'app-pay-01').baseline.perf.ioClass | Should -Be 'Standard'
+        (Get-Vm $inventory 'sql-pay-01').baseline.perf.memAvgPct | Should -Be 70
+        (Get-Vm $inventory 'dev-build-01').baseline.perf.cpuPeakPct | Should -Be 4
+        (Get-Vm $inventory 'web-shop-01').baseline.perf | Should -BeNullOrEmpty
+    }
+
+    It 'keeps the RVTools sample alongside' {
+        (Get-Vm $inventory 'app-pay-01').baseline.cpuUsagePct | Should -Be 25
+    }
+
+    It 'profiles a VM by its LiveOptics averages' {
+        (Get-Vm $inventory 'dev-hot-01').profile | Should -Be 'idle'
+    }
+
+    It 'joins hosts on the full or short name' {
+        ($inventory.hosts | Where-Object name -eq 'esx01.example.test').baseline.perf.cpuAvgPct | Should -Be 35
+        ($inventory.hosts | Where-Object name -eq 'esx02.example.test').baseline.perf.throughputPeakMBps | Should -Be 250
+        ($inventory.hosts | Where-Object name -eq 'esx03.example.test').baseline.perf | Should -BeNullOrEmpty
+    }
+
+    It 'counts what matched and warns about what did not' {
+        $p = $inventory.report.performance
+        $p.vmsMatched | Should -Be 4
+        $p.vmsWithout | Should -Be 4
+        $p.vmRowsUnused | Should -Be 1
+        $p.hostsMatched | Should -Be 2
+        $p.hostRowsUnused | Should -Be 1
+        $inventory.report.warnings | Should -Contain 'LiveOptics has 1 VM row(s) that match no VM in the RVTools export; they were ignored.'
+        Get-SynthInventorySummary -Inventory $inventory | Should -Contain 'Performance: LiveOptics for 4 of 8 VMs and 2 of 3 hosts'
+    }
+
+    It 'leaves no real name in an anonymised import' {
+        $anonymous = Import-SynthRvtools -Path $script:fixture -Key $script:key -TieringRules $script:rules -Performance $perf -Anonymise
+        $json = $anonymous | ConvertTo-Json -Depth 20
+        foreach ($text in 'app-pay-01', 'ghost-vm', 'esx01', 'renamed') { $json | Should -Not -Match ([regex]::Escape($text)) }
+        @($anonymous.vms | Where-Object { $_.baseline.perf }).Count | Should -Be 4
+    }
+
+    It 'refuses a workbook without the performance sheets' {
+        $other = Join-Path $TestDrive 'not-liveoptics.xlsx'
+        [pscustomobject]@{ A = 1 } | Export-Excel -Path $other -WorksheetName 'Sheet1'
+        { Read-SynthLiveOptics -Path $other } | Should -Throw "*no 'VM Performance' sheet*"
+    }
+}
+
+
 Describe 'Other export shapes' {
     It 'reads the xlsx export the same way as the CSV export' -Skip:(-not (Get-Module -ListAvailable -Name ImportExcel)) {
         Import-Module ImportExcel -WarningAction SilentlyContinue
