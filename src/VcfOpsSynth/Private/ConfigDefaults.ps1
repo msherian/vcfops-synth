@@ -35,6 +35,17 @@ function Get-SynthConfigDefault {
             performance = $null
             anonymise   = $true
         }
+        seed           = @{
+            # The vCenter adapter instance the synthetic tree goes under, by name (vc-mgmt-a).
+            adapterInstance = ''
+            # Rubrics captured from the lab; empty means <paths.data>/rubrics.
+            rubrics         = ''
+            # Seeded objects keep their inventory names; a prefix is optional. The tag marks them as synthetic.
+            prefix             = ''
+            tag                = @{ category = 'vcfops-synth'; name = 'synthetic' }
+            # Name of a Physical Data Center above the datacenters; empty means none.
+            physicalDatacenter = ''
+        }
         liveLoad       = @{
             enabled      = $false
             maxLoadVms   = 6

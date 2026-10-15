@@ -50,6 +50,19 @@ Describe 'vcfops-synth CLI' {
         $result.Output | Should -BeLike '*Phase 4*'
     }
 
+    It 'builds seed now, so it no longer reports Phase 3' {
+        $result = Invoke-Cli @('seed', '--bogus')
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike "*Unknown option '--bogus' for seed*"
+        $result.Output | Should -Not -BeLike '*not built yet*'
+    }
+
+    It 'asks for an adapter name after --adapter' {
+        $result = Invoke-Cli @('seed', '--adapter')
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike '*--adapter needs an adapter instance name*'
+    }
+
     It 'rejects arguments a command does not take' {
         $result = Invoke-Cli @('version', 'extra')
         $result.ExitCode | Should -Be 2

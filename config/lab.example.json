@@ -25,6 +25,13 @@
     "performance": null,
     "anonymise": true
   },
+  "seed": {
+    "adapterInstance": "vc-mgmt-a",
+    "rubrics": "",
+    "prefix": "",
+    "tag": { "category": "vcfops-synth", "name": "synthetic" },
+    "physicalDatacenter": "Synthetic Physical Datacenter"
+  },
   "liveLoad": {
     "enabled": false,
     "maxLoadVms": 6,
