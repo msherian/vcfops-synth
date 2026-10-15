@@ -266,41 +266,211 @@ function Get-SynthDatastoreDatacenter {
     $null
 }
 
-function Get-SynthRubricValue {
-    <# One property's value from a rubric, or $null. #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][System.Collections.IDictionary]$Rubric,
-        [Parameter(Mandatory)][string]$Name
-    )
-    $match = @($Rubric.properties | Where-Object { $_.name -eq $Name })
-    if ($match.Count) { $match[0].value } else { $null }
-}
-
-function ConvertTo-SynthScrubbedValue {
+function Get-SynthPlaceholder {
     <#
     .SYNOPSIS
-        Blanks addresses and network neighbours copied from a reference object.
+        The neutral value a key gets when the inventory has nothing for it.
 
     .DESCRIPTION
-        Only keys that hold addresses are touched (IP, MAC, DNS, NTP, LLDP
-        neighbour), so version numbers such as 9.1.0.0 are left alone. Addresses
-        become documentation values and neighbour names become '-'.
+        Only the type of the rubric's value is read, never the value itself:
+        numbers (and text that reads as a number) become 0, true/false flags
+        become false, other text becomes '-'. With -Metric, the same rule serves
+        stat keys, whose history the backfill derives or leaves at zero.
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$Key,
-        [AllowNull()]$Value
+        [AllowNull()]$Value,
+        [switch]$Metric
     )
 
-    if ($Value -isnot [string] -or -not $Value) { return $Value }
-    if ($Key -match '\|discoveryProtocol\|') { return '-' }
-    if ($Key -notmatch '(?i)ip_?address|ipv6|mgmt_address|mac_address|dns|ntp|gateway') { return $Value }
-    $text = [regex]::Replace($Value, '\b(?:\d{1,3}\.){3}\d{1,3}\b', '192.0.2.1')
-    # A MAC also reads as IPv6, so both go in one pass with the MAC tried first at each position.
-    [regex]::Replace($text, '\b(?<mac>(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})\b|\bfe80::[0-9A-Fa-f:]+|\b(?:[0-9A-Fa-f]{1,4}:{1,2}){2,7}[0-9A-Fa-f]{1,4}\b', {
-            param($m) if ($m.Groups['mac'].Success) { '00:00:00:00:00:00' } else { '2001:db8::1' }
-        })
+    if ($null -eq $Value) { return $(if ($Metric) { 0 } else { '-' }) }
+    if ($Value -is [bool]) { return $false }
+    if ($Value -is [ValueType]) { return 0 }
+    $text = [string]$Value
+    if ($text -match '^(?i:true|false)$') { return 'false' }
+    $number = 0.0
+    if ([double]::TryParse($text, [System.Globalization.NumberStyles]::Float, [cultureinfo]::InvariantCulture, [ref]$number)) { return 0 }
+    '-'
+}
+
+function Get-SynthDerivedStat {
+    <#
+    .SYNOPSIS
+        The current value of each stat key the inventory can answer for one object.
+
+    .DESCRIPTION
+        Values come only from the inventory (RVTools sizing and usage, LiveOptics
+        averages): a VM's CPU, memory, disk space and I/O; a host's usage over
+        its capacity; a cluster or datacenter rolled up from its hosts and VMs;
+        a datastore's capacity and use. Keys not answered here are left to the
+        placeholder (0). Only keys the kind's rubric lists are ever used.
+    #>
+    [CmdletBinding()]
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    param(
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Item,
+        [Parameter(Mandatory)][hashtable]$Context
+    )
+
+    $d = [ordered]@{}
+    $num = { param($v) if ($null -eq $v) { 0.0 } else { [double]$v } }
+    # Baselines are optional, so they are read through Contains rather than as properties (the module runs under strict mode).
+    $pf = { param($k) if ($perf -is [System.Collections.IDictionary] -and $perf.Contains($k)) { $perf[$k] } }
+    $base = { param($o, $k) if ($o -is [System.Collections.IDictionary] -and $o.Contains('baseline') -and $o.baseline -is [System.Collections.IDictionary] -and $o.baseline.Contains($k)) { $o.baseline[$k] } }
+    $sum = { param($list, [scriptblock]$f) $t = 0.0; foreach ($x in @($list)) { if ($x) { $t += [double](& $f $x) } }; $t }
+    $hostCapMhz = { param($h) (& $num $h.cores) * (& $num $h.cpuMhz) }
+    $hostUsedMhz = { param($h) (& $num (& $base $h 'cpuUsagePct')) / 100 * (& $hostCapMhz $h) }
+    $hostMemKb = { param($h) (& $num $h.memoryMiB) * 1024 }
+    $hostUsedKb = { param($h) (& $num (& $base $h 'memUsagePct')) / 100 * (& $hostMemKb $h) }
+    $vmOn = { param($v) $v.powerState -eq 'poweredOn' }
+    $pct = { param($part, $whole) if ($whole -gt 0) { [math]::Round($part / $whole * 100, 2) } else { 0 } }
+
+    switch ($Kind) {
+        'VirtualMachine' {
+            $on = & $vmOn $Item
+            $cpu = $Item.cpu; $mem = $Item.memory; $st = $Item.storage
+            $perf = & $base $Item 'perf'
+            $cpuPct = if ($on) { & $num (& $base $Item 'cpuUsagePct') } else { 0 }
+            $usedMhz = if ($on -and $cpu) { & $num $cpu.usageMhz } else { 0 }
+            $d['cpu|usage_average'] = $cpuPct; $d['cpu|demandPct'] = $cpuPct
+            $d['cpu|usagemhz_average'] = $usedMhz; $d['cpu|demandmhz'] = $usedMhz
+            if ($cpu) { $d['cpu|vm_capacity_provisioned'] = & $num $cpu.capacityMhz; $d['config|hardware|num_Cpu'] = & $num $cpu.vcpus }
+            if ($Item.Contains('cpuReadyPct') -and $null -ne $Item.cpuReadyPct) { $d['cpu|readyPct'] = if ($on) { & $num $Item.cpuReadyPct } else { 0 } }
+            if ($mem) {
+                $sizeKb = (& $num $mem.sizeMiB) * 1024
+                $activeKb = if ($on) { (& $num $mem.activeMiB) * 1024 } else { 0 }
+                $consumedKb = if ($on) { (& $num $mem.consumedMiB) * 1024 } else { 0 }
+                $d['mem|guest_provisioned'] = $sizeKb
+                $d['mem|active_average'] = $activeKb; $d['mem|host_demand'] = $activeKb
+                $d['mem|consumed_average'] = $consumedKb; $d['mem|guest_usage'] = $consumedKb
+                $d['mem|usage_average'] = & $pct $activeKb $sizeKb
+                $d['mem|vmmemctl_average'] = if ($on) { (& $num $mem.balloonedMiB) * 1024 } else { 0 }
+                $d['mem|swapped_average'] = if ($on) { (& $num $mem.swappedMiB) * 1024 } else { 0 }
+            }
+            if ($st) {
+                $d['diskspace|provisioned'] = [math]::Round((& $num $st.provisionedMiB) / 1024, 2)
+                $d['diskspace|used'] = [math]::Round((& $num $st.inUseMiB) / 1024, 2)
+                $capGb = (& $sum $st.partitions { param($p) (& $num $p.capacityMiB) / 1024 })
+                $useGb = (& $sum $st.partitions { param($p) (& $num $p.consumedMiB) / 1024 })
+                $d['guestfilesystem|capacity_total'] = [math]::Round($capGb, 2)
+                $d['guestfilesystem|usage_total'] = [math]::Round($useGb, 2)
+                $d['guestfilesystem|percentage_total'] = & $pct $useGb $capGb
+            }
+            if ($perf -and $on) {
+                $d['virtualDisk|numberReadAveraged_average'] = & $num (& $pf 'readIopsAvg')
+                $d['virtualDisk|numberWriteAveraged_average'] = & $num (& $pf 'writeIopsAvg')
+                $d['virtualDisk|read_average'] = (& $num (& $pf 'readMBpsAvg')) * 1024
+                $d['virtualDisk|write_average'] = (& $num (& $pf 'writeMBpsAvg')) * 1024
+                $d['virtualDisk|totalReadLatency_average'] = & $num (& $pf 'readLatencyAvgMs')
+                $d['virtualDisk|totalWriteLatency_average'] = & $num (& $pf 'writeLatencyAvgMs')
+                $d['storage|totalReadLatency_average'] = & $num (& $pf 'readLatencyAvgMs')
+                $d['storage|totalWriteLatency_average'] = & $num (& $pf 'writeLatencyAvgMs')
+            }
+        }
+        'HostSystem' {
+            $vms = @($Context.vmsByHost[$Item.id])
+            $capMhz = & $hostCapMhz $Item
+            $usedMhz = & $hostUsedMhz $Item
+            $d['cpu|usage_average'] = & $num (& $base $Item 'cpuUsagePct'); $d['cpu|demandPct'] = $d['cpu|usage_average']
+            $d['cpu|usagemhz_average'] = $usedMhz; $d['cpu|demandmhz'] = $usedMhz
+            $d['cpu|capacity_provisioned'] = $capMhz; $d['cpu|totalCapacity_average'] = $capMhz
+            $d['cpu|corecount_provisioned'] = & $num $Item.cores
+            $d['cpu|capacity_usagepct_average'] = & $pct $usedMhz $capMhz
+            $d['cpu|vm_capacity_provisioned'] = & $sum $vms { param($v) & $num $v.cpu.capacityMhz }
+            $memKb = & $hostMemKb $Item
+            $d['mem|host_provisioned'] = $memKb; $d['mem|totalCapacity_average'] = $memKb
+            $d['mem|consumed_average'] = & $hostUsedKb $Item; $d['mem|host_usage'] = $d['mem|consumed_average']
+            $d['mem|usage_average'] = & $num (& $base $Item 'memUsagePct'); $d['mem|host_usagePct'] = $d['mem|usage_average']
+            $d['mem|active_average'] = & $sum $vms { param($v) if (& $vmOn $v) { (& $num $v.memory.activeMiB) * 1024 } else { 0 } }
+            $d['summary|total_number_vms'] = $vms.Count
+            $d['summary|number_running_vms'] = @($vms | Where-Object { & $vmOn $_ }).Count
+            $d['summary|number_running_vcpus'] = & $sum $vms { param($v) if (& $vmOn $v) { & $num $v.cpu.vcpus } else { 0 } }
+            $d['summary|total_number_datastores'] = @($Context.datastoresByHost[$Item.id]).Count
+            $perf = & $base $Item 'perf'
+            if ($perf) {
+                $d['storage|commandsAveraged_average'] = & $num (& $pf 'iopsAvg')
+                $d['storage|usage_average'] = (& $num (& $pf 'throughputAvgMBps')) * 1024
+                $d['storage|totalReadLatency_average'] = & $num (& $pf 'readLatencyAvgMs')
+                $d['storage|totalWriteLatency_average'] = & $num (& $pf 'writeLatencyAvgMs')
+            }
+        }
+        { $_ -in 'ClusterComputeResource', 'Datacenter' } {
+            $hosts = @(if ($Kind -eq 'Datacenter') { $Context.hostsByDatacenter[$Item.id] } else { $Context.hostsByCluster[$Item.id] })
+            $vms = @(if ($Kind -eq 'Datacenter') { $Context.vmsByDatacenter[$Item.id] } else { $Context.vmsByCluster[$Item.id] })
+            $capMhz = & $sum $hosts $hostCapMhz
+            $usedMhz = & $sum $hosts $hostUsedMhz
+            $memKb = & $sum $hosts $hostMemKb
+            $usedKb = & $sum $hosts $hostUsedKb
+            $d['cpu|capacity_provisioned'] = $capMhz
+            $d['cpu|corecount_provisioned'] = & $sum $hosts { param($h) & $num $h.cores }
+            $d['cpu|usagemhz_average'] = $usedMhz; $d['cpu|demandmhz'] = $usedMhz
+            $d['cpu|capacity_usagepct_average'] = & $pct $usedMhz $capMhz; $d['cpu|demandPct'] = $d['cpu|capacity_usagepct_average']
+            $d['cpu|vm_capacity_provisioned'] = & $sum $vms { param($v) & $num $v.cpu.capacityMhz }
+            $d['mem|host_provisioned'] = $memKb; $d['mem|totalCapacity_average'] = $memKb
+            $d['mem|consumed_average'] = $usedKb; $d['mem|host_usage'] = $usedKb
+            $d['mem|usage_average'] = & $pct $usedKb $memKb; $d['mem|host_usagePct'] = $d['mem|usage_average']
+            $d['summary|total_number_hosts'] = $hosts.Count
+            $d['summary|number_running_hosts'] = @($hosts | Where-Object { -not $_.maintenance }).Count
+            $d['summary|total_number_vms'] = $vms.Count
+            $d['summary|number_running_vms'] = @($vms | Where-Object { & $vmOn $_ }).Count
+            $d['summary|number_poweredOff_vms'] = $vms.Count - $d['summary|number_running_vms']
+            $d['summary|number_running_vcpus'] = & $sum $vms { param($v) if (& $vmOn $v) { & $num $v.cpu.vcpus } else { 0 } }
+            $d['summary|vm_count_per_host'] = if ($hosts.Count) { [math]::Round($vms.Count / $hosts.Count, 2) } else { 0 }
+            $d['summary|avg_vm_density'] = $d['summary|vm_count_per_host']
+            if ($Kind -eq 'Datacenter') {
+                $d['summary|total_number_clusters'] = @($Context.clustersByDatacenter[$Item.id]).Count
+                $d['summary|total_number_datastores'] = @($Context.datastoresByDatacenter[$Item.id]).Count
+            }
+        }
+        'Datastore' {
+            $capGb = (& $num $Item.capacityMiB) / 1024
+            $useGb = (& $num $Item.inUseMiB) / 1024
+            $provGb = (& $num $Item.provisionedMiB) / 1024
+            foreach ($k in 'capacity|total_capacity', 'capacity|usableCapacity', 'capacity|effectiveTotalCapacity', 'diskspace|capacity', 'diskspace|disktotal', 'diskspace|total|usableCapacity') { $d[$k] = [math]::Round($capGb, 2) }
+            foreach ($k in 'capacity|used_space', 'capacity|effectiveUsedCapacity', 'diskspace|diskused', 'diskspace|used') { $d[$k] = [math]::Round($useGb, 2) }
+            foreach ($k in 'capacity|available_space', 'capacity|effectiveFreeCapacity', 'capacity|effectiveCapacityRemaining', 'diskspace|freespace') { $d[$k] = [math]::Round([math]::Max(0, $capGb - $useGb), 2) }
+            $d['capacity|usedSpacePct'] = & $pct $useGb $capGb
+            $d['capacity|provisioned'] = [math]::Round($provGb, 2); $d['capacity|consumer_provisioned'] = $d['capacity|provisioned']
+            $d['diskspace|diskspace_overcommit_ratio'] = if ($capGb -gt 0) { [math]::Round($provGb / $capGb, 2) } else { 0 }
+            $d['summary|total_number_hosts'] = @($Item.hosts).Count
+            $d['summary|total_number_vms'] = @($Context.vmsByDatastore[$Item.id]).Count
+        }
+    }
+    $d
+}
+
+function Get-SynthDerivationContext {
+    <# Indexes the inventory once so per-object derivations (host VMs, cluster hosts and so on) need no scans. #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Inventory)
+
+    $context = @{}
+    foreach ($name in 'vmsByHost', 'vmsByCluster', 'vmsByDatacenter', 'vmsByDatastore', 'hostsByCluster', 'hostsByDatacenter', 'clustersByDatacenter', 'datastoresByHost', 'datastoresByDatacenter') { $context[$name] = @{} }
+    $add = { param($map, $key, $value) if ($key) { if (-not $context[$map].ContainsKey($key)) { $context[$map][$key] = [System.Collections.Generic.List[object]]::new() }; $context[$map][$key].Add($value) } }
+    foreach ($vm in @($Inventory.vms)) {
+        & $add 'vmsByHost' $vm.host $vm
+        & $add 'vmsByCluster' $vm.cluster $vm
+        & $add 'vmsByDatacenter' $vm.datacenter $vm
+        foreach ($ds in @($vm.datastores)) { & $add 'vmsByDatastore' $ds $vm }
+    }
+    $hostDc = @{}
+    foreach ($h in @($Inventory.hosts)) {
+        & $add 'hostsByCluster' $h.cluster $h
+        & $add 'hostsByDatacenter' $h.datacenter $h
+        if ($h.id) { $hostDc[$h.id] = $h.datacenter }
+    }
+    foreach ($c in @($Inventory.clusters)) { & $add 'clustersByDatacenter' $c.datacenter $c }
+    foreach ($ds in @($Inventory.datastores)) {
+        $dcs = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($hostId in @($ds.hosts)) {
+            & $add 'datastoresByHost' $hostId $ds
+            if ($hostId -and $hostDc[$hostId]) { $null = $dcs.Add($hostDc[$hostId]) }
+        }
+        foreach ($dc in $dcs) { & $add 'datastoresByDatacenter' $dc $ds }
+    }
+    $context
 }
 
 function ConvertTo-SynthGuid {

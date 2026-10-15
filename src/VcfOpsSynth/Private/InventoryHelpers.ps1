@@ -113,3 +113,22 @@ function Resolve-SynthVmClass {
     }
     $result
 }
+
+function Get-SynthProjectName {
+    <#
+    .SYNOPSIS
+        The project an export belongs to, from the folder it sits in, or $null.
+
+    .DESCRIPTION
+        Project folders are named <year>.<number> <name> ... OPP-<n>, for example
+        '2026.1234 Example Ltd Refresh - OPP-10001'. The deepest path element
+        that matches is the project; the seed tags every object with it.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$Path)
+
+    if (-not $Path) { return $null }
+    $match = @(($Path -split '[\\/]') | Where-Object { $_ -match '^\d{4}\.\d{4}\b.*OPP-\d+$' })
+    if ($match.Count) { $match[-1] } else { $null }
+}

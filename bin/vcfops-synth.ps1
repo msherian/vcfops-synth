@@ -34,6 +34,7 @@
                           objects that already exist (by identifier) are skipped.
                           --adapter <name>   vCenter adapter instance (default seed.adapterInstance)
                           --dry-run          build and summarise the plan; create nothing
+                          --refresh          also push planned properties and current stats to objects already there
 
     Commands still to come, by build phase:
         reset             Phase 3   Remove the objects seed created
@@ -133,7 +134,7 @@ function Read-ImportArgument {
 function Read-SeedArgument {
     param([string[]]$Argument)
     if (-not $Argument) { $Argument = @() }
-    $parsed = @{ Adapter = $null; DryRun = $false }
+    $parsed = @{ Adapter = $null; DryRun = $false; Refresh = $false }
     for ($i = 0; $i -lt $Argument.Count; $i++) {
         $arg = $Argument[$i]
         switch -Regex ($arg) {
@@ -143,6 +144,7 @@ function Read-SeedArgument {
                 break
             }
             '^--dry-run$' { $parsed.DryRun = $true; break }
+            '^--refresh$' { $parsed.Refresh = $true; break }
             default { throw [System.ArgumentException]::new("Unknown option '$arg' for seed.") }
         }
     }
@@ -270,7 +272,12 @@ try {
             $null = Connect-SynthOps -Config $config
             try {
                 $target = Resolve-SynthSeedTarget -Name $adapterName
-                $plan = New-SynthSeedPlan -Inventory $inventory -Rubric $rubrics -VcId $target.VcId -Prefix $config.seed.prefix -Tag @{ Category = $config.seed.tag.category; Name = $config.seed.tag.name } -CustomAdapterKind $config.adapterKind.key -PhysicalDatacenter $config.seed.physicalDatacenter
+                # The synthetic marker, then the project: seed.project, else the project folder the import came from.
+                $tags = @(@{ Category = $config.seed.tag.category; Name = $config.seed.tag.name })
+                $project = if ($config.seed.project) { $config.seed.project } elseif ($inventory.source -and $inventory.source.Contains('project')) { $inventory.source.project } else { $null }
+                if ($project) { $tags += @{ Category = 'Project'; Name = $project } }
+                $plan = New-SynthSeedPlan -Inventory $inventory -Rubric $rubrics -VcId $target.VcId -Prefix $config.seed.prefix -Tag $tags -CustomAdapterKind $config.adapterKind.key -PhysicalDatacenter $config.seed.physicalDatacenter
+                Write-Host "Tags: $(($tags | ForEach-Object { "$($_.Category): $($_.Name)" }) -join '; ')"
                 $objects = @($plan.objects)
                 Write-Host "Seed plan for adapter instance $adapterName ($($target.AdapterInstanceId)), vCenter $($target.VcId):"
                 $objects | Group-Object { $_.kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count)" }
@@ -283,11 +290,12 @@ try {
                     exit 0
                 }
 
-                $result = Invoke-SynthSeed -Plan $plan -AdapterInstanceId $target.AdapterInstanceId
+                $result = Invoke-SynthSeed -Plan $plan -AdapterInstanceId $target.AdapterInstanceId -Refresh:$options.Refresh
                 foreach ($kind in $result.created.Keys) {
                     Write-Host "  $($kind): $($result.created[$kind]) created, $($result.existing[$kind]) already there"
                 }
                 Write-Host "  $($result.links) links made"
+                if ($options.Refresh) { Write-Host "  $($result.refreshed) existing objects had their properties and stats refreshed" }
                 foreach ($note in $result.renamed) { Write-Host "Not renamed: $note" }
                 foreach ($failure in $result.failed) { Write-Host "Failed: $failure" }
             }

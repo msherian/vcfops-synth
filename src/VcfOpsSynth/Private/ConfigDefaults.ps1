@@ -43,6 +43,8 @@ function Get-SynthConfigDefault {
             # Seeded objects keep their inventory names; a prefix is optional. The tag marks them as synthetic.
             prefix             = ''
             tag                = @{ category = 'vcfops-synth'; name = 'synthetic' }
+            # Project tag (category Project); empty means the YYYY.#### ... OPP-n folder the RVTools export was imported from.
+            project            = ''
             # Name of a Physical Data Center above the datacenters; empty means none.
             physicalDatacenter = ''
         }

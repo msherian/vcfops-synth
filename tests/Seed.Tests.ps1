@@ -20,11 +20,11 @@ BeforeAll {
     function New-TestRubricSet {
         @{
             Datacenter                     = New-TestRubric 'Datacenter' @{ 'summary|number_vm' = 3 }
-            ClusterComputeResource         = New-TestRubric 'ClusterComputeResource' @{ 'cpu|usage_average' = 12.5 } @{
+            ClusterComputeResource         = New-TestRubric 'ClusterComputeResource' @{ 'cpu|usage_average' = 12.5; 'cpu|capacity_provisioned' = 7; 'summary|total_number_hosts' = 7 } @{
                 'summary|parentDatacenter' = 'ref-dc'; 'configuration|dasConfig|enabled' = 'Disabled'; 'configuration|drsConfig|enabled' = 'true'
             }
             HostSystem                     = New-TestRubric 'HostSystem' @{
-                'cpu|usage_average' = 20; 'health|reports|hostd|state' = 'green'
+                'cpu|usage_average' = 20; 'cpu|usagemhz_average' = 7; 'mem|consumed_average' = 7; 'summary|total_number_vms' = 7; 'health|reports|hostd|state' = 'green'
                 'net:vmnic0|received_average' = 5; 'net:vmnic1|received_average' = 6; 'net:Aggregate of all instances|received_average' = 11
                 'storageAdapter:vmhba0|commandsAveraged_average' = 1
             } @{
@@ -33,23 +33,23 @@ BeforeAll {
                 'net:vmk0|ip_address' = '10.20.30.40'; 'net:vmk0|mac_address' = 'aa:bb:cc:dd:ee:ff'; 'net:vmk0|port_group_key' = 'dvportgroup-ref'
                 'net:vmk0|discoveryProtocol|cdp|systemName' = 'ref-switch-01'
                 'config|network|dnsserver' = '10.0.0.53, fd00:1:2::53'
-                'summary|version' = '9.1.0.0'
+                'summary|version' = '9.1.0-25557999'; 'summary|version_4d' = '9.1.0.0.25557999'; 'config|product|apiVersion' = '9.1.0.0'; 'sys|build' = '25557999'
             }
             Datastore                      = New-TestRubric 'Datastore' @{ 'capacity|used_space' = 100 } @{ 'summary|type' = 'nfs'; 'summary|parentDatacenter' = 'ref-dc' }
             VmwareDistributedVirtualSwitch = New-TestRubric 'VmwareDistributedVirtualSwitch' @{ 'host:ref-esx|port_count' = 4 } @{ 'summary|version' = '7.0.0' }
             DistributedVirtualPortgroup    = New-TestRubric 'DistributedVirtualPortgroup' @{ 'port|used' = 2 } @{ 'config|policies|security|vlan_id' = '7' }
             VMFolder                       = New-TestRubric 'VMFolder' @{ 'summary|number_vm' = 1 } @{ 'summary|parentDatacenter' = 'ref-dc' }
             VirtualMachine                 = New-TestRubric 'VirtualMachine' @{
-                'cpu|usage_average' = 33.3; 'guest|tools_status' = 'toolsOk'
+                'cpu|usage_average' = 33.3; 'mem|usage_average' = 50; 'guest|tools_status' = 'toolsOk'
                 'virtualDisk:scsi0:0|read_average' = 1; 'virtualDisk:scsi0:3|read_average' = 2; 'virtualDisk:scsi0:3|write_average' = 3
                 'virtualDisk:Aggregate of all instances|read_average' = 3
                 'guestfilesystem:/ref|percentage' = 50
                 'net:4000|usage_average' = 9
             } @{
-                'virtualDisk:scsi0:0|label' = 'Hard disk 1'; 'virtualDisk:scsi0:0|configuredGB' = 999
+                'virtualDisk:scsi0:0|label' = 'Hard disk 9'; 'virtualDisk:scsi0:0|configuredGB' = 999
                 'guestfilesystem:/ref|capacity' = 10
                 'net:4000|mac_address' = '00:50:56:aa:bb:cc'; 'net:4000|ip_address' = '10.9.8.7'; 'net:4000|portGroup' = 'ref-pg'
-                'summary|guest|ipAddress' = '10.9.8.7'; 'summary|parentHost' = 'ref-esx'
+                'summary|guest|ipAddress' = '10.9.8.7'; 'summary|parentHost' = 'ref-esx'; 'summary|parentHostVersion' = '9.1.0'; 'summary|parentHostVersion4d' = '9.1.0.0'
                 'config|annotation' = 'Owned by ref-VirtualMachine on ref-esx'
             }
         }
@@ -89,18 +89,18 @@ BeforeAll {
 
     # One datacenter's worth of inventory, plus references to hosts and datastores outside the plan.
     function New-TestInventory {
-        Complete-TestInventory @{
+        $inventory = Complete-TestInventory @{
             datacenters   = @(@{ id = 'dc-aaaa000001'; name = 'dc-aaaa000001' })
             clusters      = @(@{ id = 'cluster-bbbb000001'; name = 'cluster-bbbb000001'; datacenter = 'dc-aaaa000001'; haEnabled = $true; drsEnabled = $false })
             hosts         = @(@{
                     id = 'esx-cccc000001'; name = 'esx-cccc000001'; datacenter = 'dc-aaaa000001'; cluster = 'cluster-bbbb000001'
                     cpuModel = 'Test CPU'; cpuMhz = 2000; sockets = 2; cores = 16; memoryMiB = 1024; esxVersion = 'VMware ESXi 8.0.2 build-22380479'
-                    vendor = 'Acme'; model = 'Box 1'; maintenance = $false
+                    vendor = 'Acme'; model = 'Box 1'; maintenance = $false; baseline = @{ cpuUsagePct = 30; memUsagePct = 50 }
                     nics = @(@{ device = 'vmnic0'; driver = 'drv0'; speedMbps = 10000 }, @{ device = 'vmnic1'; driver = 'drv1'; speedMbps = 1000 }, @{ device = 'vmnic2'; driver = 'drv1'; speedMbps = 1000 })
                     hbas = @(@{ device = 'vmhba0'; driver = 'hbadrv' })
                     vmkernels = @(@{ device = 'vmk0'; network = 'net-dddd000001' })
                 })
-            datastores    = @(@{ id = 'ds-eeee000001'; name = 'ds-eeee000001'; type = 'VMFS'; capacityMiB = 2048; hosts = @('esx-cccc000001') })
+            datastores    = @(@{ id = 'ds-eeee000001'; name = 'ds-eeee000001'; type = 'VMFS'; capacityMiB = 2048; inUseMiB = 1024; provisionedMiB = 3072; hosts = @('esx-cccc000001') })
             switches      = @(
                 @{ id = 'dvs-ffff000001'; name = 'dvs-ffff000001'; kind = 'distributed'; datacenter = 'dc-aaaa000001'; version = '8.0.0'; hosts = @('esx-cccc000001', 'esx-notinplan') }
                 @{ id = 'vss-ffff000002'; name = 'vss-ffff000002'; kind = 'standard'; datacenter = 'dc-aaaa000001'; mtu = 1500; ports = 128; hosts = @('esx-cccc000001') }
@@ -119,8 +119,9 @@ BeforeAll {
                     id = 'vm-3333000001'; name = 'vm-3333000001'; powerState = 'poweredOn'; datacenter = 'dc-aaaa000001'; cluster = 'cluster-bbbb000001'
                     host = 'esx-cccc000001'; datastores = @('ds-eeee000001'); folderId = 'folder-1111000002'; resourcePoolId = 'rp-2222000001'
                     guestOs = 'Microsoft Windows Server 2022 (64-bit)'; hardwareVersion = 19; toolsVersion = 12345
-                    cpu = @{ vcpus = 4; sockets = 2; coresPerSocket = 2; reservationMhz = 0; limitMhz = $null }
-                    memory = @{ sizeMiB = 8192; reservationMiB = 0; limitMiB = $null }
+                    cpu = @{ vcpus = 4; sockets = 2; coresPerSocket = 2; capacityMhz = 8000; usageMhz = 1000; reservationMhz = 0; limitMhz = $null }
+                    memory = @{ sizeMiB = 8192; activeMiB = 2048; consumedMiB = 4096; reservationMiB = 0; limitMiB = $null }
+                    baseline = @{ cpuUsagePct = 12.5; memActivePct = 25; perf = @{ readIopsAvg = 40; writeIopsAvg = 10; readLatencyAvgMs = 1.5 } }
                     storage = @{
                         provisionedMiB = 61440
                         disks = @(@{ label = 'Hard disk 1'; capacityMiB = 40960; thin = $true; datastore = 'ds-eeee000001' }, @{ label = 'Hard disk 2'; capacityMiB = 20480; thin = $false; datastore = 'ds-eeee000001' })
@@ -138,6 +139,9 @@ BeforeAll {
                 }
             )
         }
+        # Set after Complete-TestInventory, which treats every key as a collection of records.
+        $inventory.source = @{ vcenter = 'vc-customer.example.test' }
+        $inventory
     }
 
     function Get-PlanObject {
@@ -302,32 +306,68 @@ Describe 'New-SynthSeedPlan' {
         $dvsKeys | Should -Be @('host:Synth-esx-cccc000001|port_count')
     }
 
-    It 'keeps text metrics as text and fills identity properties from the inventory' {
-        Get-Entry $script:esx.stats 'health|reports|hostd|state' | Should -Be 'green'
-        Get-Entry $script:vm.stats 'guest|tools_status' | Should -Be 'toolsOk'
+    It 'fills identity properties from the inventory' {
         Get-Entry $script:vm.properties 'summary|parentHost' | Should -Be 'Synth-esx-cccc000001'
         Get-Entry $script:vm.properties 'config|name' | Should -Be 'Synth-vm-3333000001'
         Get-Entry $script:esx.properties 'summary|parentCluster' | Should -Be 'Synth-cluster-bbbb000001'
         Get-Entry $script:esx.properties 'summary|version' | Should -Be '8.0.2-22380479'
+        Get-Entry $script:esx.properties 'summary|version_4d' | Should -Be '8.0.2.0.22380479'
+        Get-Entry $script:esx.properties 'config|product|apiVersion' | Should -Be '8.0.2.0'
+        Get-Entry $script:esx.properties 'sys|build' | Should -Be '22380479'
+        Get-Entry $script:vm.properties 'summary|parentHostVersion' | Should -Be '8.0.2'
+        Get-Entry $script:vm.properties 'summary|parentHostVersion4d' | Should -Be '8.0.2.0'
+        ($script:plan.objects | ForEach-Object { $_.properties } | ForEach-Object { [string]$_.value }) -join ' ' | Should -Not -Match '9\.1\.0|25557999'
         Get-Entry (Get-PlanObject $script:plan 'cluster-bbbb000001').properties 'configuration|dasConfig|enabled' | Should -Be 'Enabled'
         Get-Entry (Get-PlanObject $script:plan 'net-dddd000001').properties 'config|policies|security|vlan_id' | Should -Be '120'
     }
 
-    It 'renames the reference object wherever its names appear in copied text' {
-        Get-Entry $script:vm.properties 'config|annotation' | Should -Be 'Owned by Synth-vm-3333000001 on Synth-esx-cccc000001'
-    }
-
-    It 'does not copy the reference object''s addresses or neighbours' {
-        Get-Entry $script:esx.properties 'net:vmk0|ip_address' | Should -Be '192.0.2.1'
-        Get-Entry $script:esx.properties 'net:vmk0|mac_address' | Should -Be '00:00:00:00:00:00'
+    It 'never copies a value from the rubric: inventory, derived or placeholder only' {
+        # Properties the inventory has nothing for get a neutral value by type.
+        Get-Entry $script:vm.properties 'config|annotation' | Should -Be '-'
+        Get-Entry $script:esx.properties 'net:vmk0|ip_address' | Should -Be '-'
+        Get-Entry $script:esx.properties 'net:vmk0|mac_address' | Should -Be '-'
         Get-Entry $script:esx.properties 'net:vmk0|discoveryProtocol|cdp|systemName' | Should -Be '-'
-        Get-Entry $script:esx.properties 'config|network|dnsserver' | Should -Be '192.0.2.1, 2001:db8::1'
+        Get-Entry $script:esx.properties 'config|network|dnsserver' | Should -Be '-'
         Get-Entry $script:vm.properties 'summary|guest|ipAddress' | Should -Be '-'
         Get-Entry $script:vm.properties 'net:4000|ip_address' | Should -Be '-'
-        $all = ($script:plan.objects | ForEach-Object { $_.properties } | ForEach-Object { [string]$_.value }) -join "`n"
-        $all | Should -Not -Match '10\.(9|20|0)\.'
-        $all | Should -Not -Match 'aa:bb:cc'
-        $all | Should -Not -Match 'ref-switch-01'
+        Get-Entry $script:vm.properties 'summary|parentVcenter' | Should -Be 'vc-customer.example.test'
+        # Text metrics with no source are placeholders too; numbers are derived or zero.
+        Get-Entry $script:esx.stats 'health|reports|hostd|state' | Should -Be '-'
+        Get-Entry $script:vm.stats 'guest|tools_status' | Should -Be '-'
+        Get-Entry $script:vm.stats 'virtualDisk:scsi0:1|write_average' | Should -Be 0
+        Get-Entry (Get-PlanObject $script:plan 'cluster-bbbb000001').stats 'cpu|usage_average' | Should -Be 0
+        $rubric = New-TestRubricSet
+        $copied = foreach ($o in $script:plan.objects) {
+            if (-not $rubric.ContainsKey($o.kind)) { continue }
+            $ref = @{}; foreach ($p in $rubric[$o.kind].properties) { $ref[$p.name] = [string]$p.value }
+            foreach ($p in $o.properties) {
+                if ($ref.ContainsKey($p.key) -and [string]$p.value -eq $ref[$p.key] -and $ref[$p.key] -notin '-', '0', 'false', 'true', '') { "$($o.kind) $($p.key)" }
+            }
+        }
+        @($copied) | Should -BeNullOrEmpty
+        ($script:plan.objects | ForEach-Object { $_.properties; $_.stats } | ForEach-Object { [string]$_.value }) -join "`n" | Should -Not -Match 'ref-|10\.(9|20|0)\.|aa:bb:cc|toolsOk|green'
+    }
+
+    It 'derives current stats from the inventory: VM usage, host over capacity, cluster and datastore roll-ups' {
+        Get-Entry $script:vm.stats 'cpu|usage_average' | Should -Be 12.5
+        Get-Entry $script:vm.stats 'mem|usage_average' | Should -Be 25
+        Get-Entry $script:linuxVm.stats 'cpu|usage_average' | Should -Be 0
+        Get-Entry $script:esx.stats 'cpu|usage_average' | Should -Be 30
+        Get-Entry $script:esx.stats 'cpu|usagemhz_average' | Should -Be 9600
+        Get-Entry $script:esx.stats 'mem|consumed_average' | Should -Be 524288
+        Get-Entry $script:esx.stats 'summary|total_number_vms' | Should -Be 1
+        $cluster = Get-PlanObject $script:plan 'cluster-bbbb000001'
+        Get-Entry $cluster.stats 'cpu|capacity_provisioned' | Should -Be 32000
+        Get-Entry $cluster.stats 'summary|total_number_hosts' | Should -Be 1
+        $ds = Get-PlanObject $script:plan 'ds-eeee000001'
+        Get-Entry $ds.stats 'capacity|used_space' | Should -Be 1
+    }
+
+    It 'writes several tags, the synthetic marker and the project' {
+        $tagged = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001' -Tag @(@{ Category = 'vcfops-synth'; Name = 'synthetic' }, @{ Category = 'Project'; Name = '2026.0001 Example Ltd - OPP-1' })
+        $o = Get-PlanObject $tagged 'vm-3333000001'
+        Get-Entry $o.properties 'summary|tag' | Should -Be '[<vcfops-synth-synthetic>, <Project-2026.0001 Example Ltd - OPP-1>]'
+        @(Get-Entry $o.properties 'summary|tagJson' | ConvertFrom-Json).category | Should -Be @('vcfops-synth', 'Project')
     }
 
     It 'links only objects in the plan, parents to children' {
@@ -357,14 +397,27 @@ Describe 'New-SynthSeedPlan' {
     }
 }
 
-Describe 'ConvertTo-SynthScrubbedValue' {
-    It 'touches only address keys' {
+Describe 'Get-SynthPlaceholder' {
+    It 'reads only the type of the rubric value' {
         InModuleScope VcfOpsSynth {
-            ConvertTo-SynthScrubbedValue -Key 'summary|version' -Value '9.1.0.0' | Should -Be '9.1.0.0'
-            ConvertTo-SynthScrubbedValue -Key 'net:vmk1|ip_address' -Value '172.16.5.4' | Should -Be '192.0.2.1'
-            ConvertTo-SynthScrubbedValue -Key 'config|ntp|server' -Value 'fe80::1:2' | Should -Be '2001:db8::1'
-            ConvertTo-SynthScrubbedValue -Key 'net:vmk1|mac_address' -Value '0A:1B:2C:3D:4E:5F' | Should -Be '00:00:00:00:00:00'
-            ConvertTo-SynthScrubbedValue -Key 'net:vmk1|ip_address' -Value 12 | Should -Be 12
+            Get-SynthPlaceholder -Value 'lab-host-01.example.test' | Should -Be '-'
+            Get-SynthPlaceholder -Value 42.5 | Should -Be 0
+            Get-SynthPlaceholder -Value '42.5' | Should -Be 0
+            Get-SynthPlaceholder -Value 'true' | Should -Be 'false'
+            Get-SynthPlaceholder -Value $true | Should -BeFalse
+            Get-SynthPlaceholder -Value '9.1.0.0' | Should -Be '-'
+            Get-SynthPlaceholder -Value $null -Metric | Should -Be 0
+        }
+    }
+}
+
+Describe 'Get-SynthProjectName' {
+    It 'takes the deepest YYYY.#### ... OPP-n folder of the path' {
+        InModuleScope VcfOpsSynth {
+            Get-SynthProjectName -Path 'C:\Projects\2026.0001 Example Ltd  Refresh - OPP-10001\Exports\rvtools.xlsx' | Should -Be '2026.0001 Example Ltd  Refresh - OPP-10001'
+            Get-SynthProjectName -Path '/mnt/share/2025.0420 Other Co - OPP-7/rv.xlsx' | Should -Be '2025.0420 Other Co - OPP-7'
+            Get-SynthProjectName -Path 'C:\data\rvtools.xlsx' | Should -BeNullOrEmpty
+            Get-SynthProjectName -Path '' | Should -BeNullOrEmpty
         }
     }
 }
@@ -464,9 +517,9 @@ Describe 'Invoke-SynthSeed' {
         @($script:posts | Where-Object { $_.Path -like 'resources/*/properties' }).Count | Should -Be 10
         $vmStats = @($script:posts | Where-Object { $_.Path -eq 'resources/ops-VirtualMachine-vm-3333000001/stats' })[0].Body.'stat-content'
         $tools = @($vmStats | Where-Object { $_.statKey -eq 'guest|tools_status' })[0]
-        $tools.values | Should -Be @('toolsOk')
+        $tools.values | Should -Be @('-')
         $tools.Contains('data') | Should -BeFalse
-        @($vmStats | Where-Object { $_.statKey -eq 'cpu|usage_average' })[0].data | Should -Be @(33.3)
+        @($vmStats | Where-Object { $_.statKey -eq 'cpu|usage_average' })[0].data | Should -Be @(12.5)
         $vssProps = @($script:posts | Where-Object { $_.Path -eq 'resources/ops-StandardSwitch-vss-ffff000002/properties' })[0].Body.'property-content'
         @($vssProps | Where-Object { $_.statKey -eq 'summary|tag' })[0].values | Should -Be @('[<vcfops-synth-synthetic>]')
         @($script:posts | Where-Object { $_.Path -like 'resources/ops-esx-existing/*' -and $_.Path -notlike '*/relationships/*' }).Count | Should -Be 0
@@ -487,6 +540,18 @@ Describe 'Invoke-SynthSeed' {
         @($links | Where-Object { $_.Path -eq 'resources/ops-PhysicalDatacenter-Test PDC/relationships/children' })[0].Body.uuids | Should -Be @('ops-dc-existing')
         @($links | Where-Object { $_.Path -eq 'resources/ops-dc-existing/relationships/children' })[0].Body.uuids | Should -Contain 'ops-ClusterComputeResource-cluster-bbbb000001'
         $result.links | Should -Be (($script:plan.links | ForEach-Object { @($_.children).Count } | Measure-Object -Sum).Sum)
+    }
+
+    It 'refreshes the properties and stats of objects already there only when asked' {
+        $null = Invoke-SynthSeed -Plan $script:plan -AdapterInstanceId 'adapter-1'
+        @($script:posts | Where-Object { $_.Path -eq 'resources/ops-esx-existing/properties' }).Count | Should -Be 0
+
+        $script:posts.Clear()
+        $result = Invoke-SynthSeed -Plan $script:plan -AdapterInstanceId 'adapter-1' -Refresh
+        $result.refreshed | Should -Be 3
+        $hostProps = @($script:posts | Where-Object { $_.Path -eq 'resources/ops-esx-existing/properties' })[0].Body.'property-content'
+        @($hostProps | Where-Object { $_.statKey -eq 'summary|version_4d' })[0].values | Should -Be @('8.0.2.0.22380479')
+        @($script:posts | Where-Object { $_.Path -eq 'resources/ops-esx-existing/stats' }).Count | Should -Be 1
     }
 
     It 'creates nothing with -WhatIf' {

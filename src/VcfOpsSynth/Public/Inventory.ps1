@@ -117,6 +117,7 @@ function Import-SynthRvtools {
     $clusters = @{}
     $hosts = @{}
     $hostsByName = @{}
+    $servers = [System.Collections.Generic.SortedSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $clusterFlags = @{}
     if ($tabs.ContainsKey('vCluster')) {
         $t = $tabs.vCluster
@@ -171,6 +172,7 @@ function Import-SynthRvtools {
             continue
         }
         $server = [string](Get-SynthRvCell $row $t.Columns 'server')
+        if ($server) { $null = $servers.Add($server) }
         $hostKey = "$server|$name"
         if ($hosts.ContainsKey($hostKey)) {
             $report.skipped.Add(@{ tab = 'vHost'; row = $rowNumber; reason = 'duplicate host' })
@@ -854,6 +856,9 @@ function Import-SynthRvtools {
             rvtoolsVersion = $metadata.rvtoolsVersion
             exportedAt     = $metadata.created
             anonymised     = [bool]$Anonymise
+            # The customer's vCenter (VI SDK Server) and the project folder the export sits in; both are real names.
+            vcenter        = if ($Anonymise) { $null } else { ($servers -join ', ') }
+            project        = if ($Anonymise) { $null } else { Get-SynthProjectName -Path $source.Source }
             tiering        = if ($TieringRules.sourcePath) { Split-Path -Leaf $TieringRules.sourcePath } else { $null }
             performance    = if ($Performance) { [ordered]@{ format = 'LiveOptics'; collectedOn = $Performance.CollectedOn } } else { $null }
         }
