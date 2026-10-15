@@ -132,3 +132,45 @@ function Get-SynthProjectName {
     $match = @(($Path -split '[\\/]') | Where-Object { $_ -match '^\d{4}\.\d{4}\b.*OPP-\d+$' })
     if ($match.Count) { $match[-1] } else { $null }
 }
+
+function Get-SynthRvConfig {
+    <#
+    .SYNOPSIS
+        Collects a row's cfg* fields (see Get-SynthRvtoolsColumnMap) into an object's config record.
+
+    .DESCRIPTION
+        Keys drop the cfg prefix (cfgHtActive becomes htActive). Empty cells are
+        left out, dates become ISO text, and when anonymising, the fields that
+        identify the customer's hardware or files (serial, service tag, UUID, URL,
+        description, licence) are dropped.
+    #>
+    [CmdletBinding()]
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    param(
+        [Parameter(Mandatory, Position = 0)][hashtable]$Row,
+        [Parameter(Mandatory, Position = 1)][hashtable]$Columns,
+        [switch]$Anonymise
+    )
+
+    $identifying = 'serial', 'serviceTag', 'uuid', 'url', 'description', 'license', 'datastoreCluster'
+    $invariant = [cultureinfo]::InvariantCulture
+    $config = [ordered]@{}
+    foreach ($field in @($Columns.Keys | Where-Object { $_ -clike 'cfg*' } | Sort-Object)) {
+        $name = $field.Substring(3, 1).ToLowerInvariant() + $field.Substring(4)
+        if ($Anonymise -and $name -in $identifying) { continue }
+        $value = $Row[$Columns[$field]]
+        if ($value -is [string]) { $value = $value.Trim() }
+        if ($null -eq $value -or ($value -is [string] -and $value -eq '')) { continue }
+        # One text form whatever the export: a CSV gives text, an xlsx numbers, dates and booleans for the same cells.
+        $number = 0.0
+        $date = [datetime]::MinValue
+        $text = if ($value -is [datetime]) { $value.ToString('yyyy-MM-ddTHH:mm:ss', $invariant) }
+        elseif ($value -is [bool]) { [string]$value }
+        elseif ($value -is [ValueType]) { ([double]$value).ToString('G15', $invariant) }
+        elseif ($value -match '^\d{4}[-/]\d{1,2}[-/]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2})?)?$' -and [datetime]::TryParse($value, $invariant, [System.Globalization.DateTimeStyles]::None, [ref]$date)) { $date.ToString('yyyy-MM-ddTHH:mm:ss', $invariant) }
+        elseif ($value -match '^-?\d+(\.\d+)?$' -and [double]::TryParse($value, [System.Globalization.NumberStyles]::Float, $invariant, [ref]$number)) { $number.ToString('G15', $invariant) }
+        else { [string]$value }
+        $config[$name] = $text
+    }
+    $config
+}

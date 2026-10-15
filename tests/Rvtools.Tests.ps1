@@ -227,6 +227,30 @@ Describe 'Tiering during import' {
     }
 }
 
+Describe 'RVTools configuration for the seed' {
+    It 'keeps each object''s cfg columns as text, plus the vCenter it came from' {
+        $inventory = Import-Fixture
+        $cluster = @($inventory.clusters | Where-Object { $_.config.Count })[0]
+        $cluster.config.admissionControl | Should -BeIn 'True', 'False'
+        $cluster.config.failoverLevel | Should -Match '^\d+$'
+        $esx = @($inventory.hosts | Where-Object { $_.config.Count })[0]
+        $esx.config.htActive | Should -BeIn 'True', 'False'
+        $esx.config.Contains('serial') | Should -BeTrue
+        @($inventory.vms | Where-Object { $_.config.Contains('creationDate') })[0].config.creationDate | Should -Match '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$'
+        $inventory.source.vcenter | Should -Not -BeNullOrEmpty
+    }
+
+    It 'drops the identifying config fields, the vCenter and the project when anonymising' {
+        $inventory = Import-Fixture -Anonymise
+        foreach ($record in @($inventory.hosts) + @($inventory.datastores) + @($inventory.switches) + @($inventory.vms)) {
+            if (-not $record.Contains('config') -or -not $record.config) { continue }
+            foreach ($field in 'serial', 'serviceTag', 'uuid', 'url', 'description', 'license', 'datastoreCluster') { $record.config.Contains($field) | Should -BeFalse }
+        }
+        $inventory.source.vcenter | Should -BeNullOrEmpty
+        $inventory.source.project | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Anonymised import' {
     BeforeAll {
         $script:anonymous = Import-Fixture -Anonymise

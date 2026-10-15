@@ -21,7 +21,7 @@ BeforeAll {
         @{
             Datacenter                     = New-TestRubric 'Datacenter' @{ 'summary|number_vm' = 3 }
             ClusterComputeResource         = New-TestRubric 'ClusterComputeResource' @{ 'cpu|usage_average' = 12.5; 'cpu|capacity_provisioned' = 7; 'summary|total_number_hosts' = 7 } @{
-                'summary|parentDatacenter' = 'ref-dc'; 'configuration|dasConfig|enabled' = 'Disabled'; 'configuration|drsConfig|enabled' = 'true'
+                'summary|parentDatacenter' = 'ref-dc'; 'configuration|dasConfig|enabled' = 'Disabled'; 'configuration|drsConfig|enabled' = 'true'; 'configuration|dasConfig|admissionControlEnabled' = 'false'; 'configuration|dasConfig|hostFailoverLevel' = '2'
             }
             HostSystem                     = New-TestRubric 'HostSystem' @{
                 'cpu|usage_average' = 20; 'cpu|usagemhz_average' = 7; 'mem|consumed_average' = 7; 'summary|total_number_vms' = 7; 'health|reports|hostd|state' = 'green'
@@ -33,11 +33,11 @@ BeforeAll {
                 'net:vmk0|ip_address' = '10.20.30.40'; 'net:vmk0|mac_address' = 'aa:bb:cc:dd:ee:ff'; 'net:vmk0|port_group_key' = 'dvportgroup-ref'
                 'net:vmk0|discoveryProtocol|cdp|systemName' = 'ref-switch-01'
                 'config|network|dnsserver' = '10.0.0.53, fd00:1:2::53'
-                'summary|version' = '9.1.0-25557999'; 'summary|version_4d' = '9.1.0.0.25557999'; 'config|product|apiVersion' = '9.1.0.0'; 'sys|build' = '25557999'
+                'summary|version' = '9.1.0-25557999'; 'config|hyperThread|active' = 'false'; 'hardware|biosVersion' = 'ref-bios'; 'runtime|connectionState' = 'disconnected'; 'summary|version_4d' = '9.1.0.0.25557999'; 'config|product|apiVersion' = '9.1.0.0'; 'sys|build' = '25557999'
             }
             Datastore                      = New-TestRubric 'Datastore' @{ 'capacity|used_space' = 100 } @{ 'summary|type' = 'nfs'; 'summary|parentDatacenter' = 'ref-dc' }
             VmwareDistributedVirtualSwitch = New-TestRubric 'VmwareDistributedVirtualSwitch' @{ 'host:ref-esx|port_count' = 4 } @{ 'summary|version' = '7.0.0' }
-            DistributedVirtualPortgroup    = New-TestRubric 'DistributedVirtualPortgroup' @{ 'port|used' = 2 } @{ 'config|policies|security|vlan_id' = '7' }
+            DistributedVirtualPortgroup    = New-TestRubric 'DistributedVirtualPortgroup' @{ 'port|used' = 2 } @{ 'config|policies|security|vlan_id' = '7'; 'config|policies|security|allow_promiscuous' = 'true' }
             VMFolder                       = New-TestRubric 'VMFolder' @{ 'summary|number_vm' = 1 } @{ 'summary|parentDatacenter' = 'ref-dc' }
             VirtualMachine                 = New-TestRubric 'VirtualMachine' @{
                 'cpu|usage_average' = 33.3; 'mem|usage_average' = 50; 'guest|tools_status' = 'toolsOk'
@@ -49,7 +49,7 @@ BeforeAll {
                 'virtualDisk:scsi0:0|label' = 'Hard disk 9'; 'virtualDisk:scsi0:0|configuredGB' = 999
                 'guestfilesystem:/ref|capacity' = 10
                 'net:4000|mac_address' = '00:50:56:aa:bb:cc'; 'net:4000|ip_address' = '10.9.8.7'; 'net:4000|portGroup' = 'ref-pg'
-                'summary|guest|ipAddress' = '10.9.8.7'; 'summary|parentHost' = 'ref-esx'; 'summary|parentHostVersion' = '9.1.0'; 'summary|parentHostVersion4d' = '9.1.0.0'
+                'summary|guest|ipAddress' = '10.9.8.7'; 'summary|parentHost' = 'ref-esx'; 'summary|parentHostVersion' = '9.1.0'; 'summary|parentHostVersion4d' = '9.1.0.0'; 'config|createDate' = '2020-01-01T00:00:00'; 'summary|config|isTemplate' = 'true'
                 'config|annotation' = 'Owned by ref-VirtualMachine on ref-esx'
             }
         }
@@ -57,11 +57,11 @@ BeforeAll {
 
     # Every field the importer writes, so records can name only what a test cares about (the module runs under strict mode).
     $script:schema = @{
-        datacenters = 'id,name'; clusters = 'id,name,datacenter,haEnabled,drsEnabled'
-        hosts       = 'id,name,datacenter,cluster,cpuModel,cpuMhz,sockets,cores,memoryMiB,esxVersion,vendor,model,maintenance,baseline,nics,hbas,vmkernels'
-        datastores  = 'id,name,type,capacityMiB,provisionedMiB,inUseMiB,hosts,baseline'; switches = 'id,name,kind,datacenter,version,mtu,ports,hosts'
-        networks    = 'id,name,kind,switch,datacenter,vlan,hosts'; folders = 'id,name,datacenter,parent'; resourcePools = 'id,name,cluster,parent,cpu,memory'
-        vms         = 'id,name,powerState,datacenter,cluster,host,datastores,folderId,resourcePoolId,tier,application,profile,guestOs,hardwareVersion,toolsStatus,toolsVersion,cpu,memory,storage,nics,snapshots,baseline'
+        datacenters = 'id,name'; clusters = 'id,name,datacenter,haEnabled,drsEnabled,config'
+        hosts       = 'id,name,datacenter,cluster,cpuModel,cpuMhz,sockets,cores,memoryMiB,esxVersion,vendor,model,maintenance,config,baseline,nics,hbas,vmkernels'
+        datastores  = 'id,name,type,capacityMiB,provisionedMiB,inUseMiB,hosts,config,baseline'; switches = 'id,name,kind,datacenter,version,mtu,ports,hosts,config'
+        networks    = 'id,name,kind,switch,datacenter,vlan,hosts,config'; folders = 'id,name,datacenter,parent'; resourcePools = 'id,name,cluster,parent,cpu,memory'
+        vms         = 'id,name,powerState,datacenter,cluster,host,datastores,folderId,resourcePoolId,config,cpuReadyPct,tier,application,profile,guestOs,hardwareVersion,toolsStatus,toolsVersion,cpu,memory,storage,nics,snapshots,baseline'
         cpu         = 'vcpus,sockets,coresPerSocket,capacityMhz,usageMhz,reservationMhz,limitMhz'; memory = 'sizeMiB,activeMiB,consumedMiB,balloonedMiB,swappedMiB,reservationMiB,limitMiB'
         storage     = 'provisionedMiB,inUseMiB,partitions,disks'; disks = 'label,capacityMiB,thin,mode,controller,unit,datastore'; partitions = 'disk,capacityMiB,consumedMiB'
         vmNics      = 'label,adapter,network,connected'; hostNics = 'device,driver,speedMbps,duplex,switch'; hbas = 'device,type,status,model,driver'; vmkernels = 'device,network,mtu'
@@ -91,11 +91,11 @@ BeforeAll {
     function New-TestInventory {
         $inventory = Complete-TestInventory @{
             datacenters   = @(@{ id = 'dc-aaaa000001'; name = 'dc-aaaa000001' })
-            clusters      = @(@{ id = 'cluster-bbbb000001'; name = 'cluster-bbbb000001'; datacenter = 'dc-aaaa000001'; haEnabled = $true; drsEnabled = $false })
+            clusters      = @(@{ id = 'cluster-bbbb000001'; name = 'cluster-bbbb000001'; datacenter = 'dc-aaaa000001'; haEnabled = $true; drsEnabled = $false; config = [ordered]@{ admissionControl = 'True'; failoverLevel = '1' } })
             hosts         = @(@{
                     id = 'esx-cccc000001'; name = 'esx-cccc000001'; datacenter = 'dc-aaaa000001'; cluster = 'cluster-bbbb000001'
                     cpuModel = 'Test CPU'; cpuMhz = 2000; sockets = 2; cores = 16; memoryMiB = 1024; esxVersion = 'VMware ESXi 8.0.2 build-22380479'
-                    vendor = 'Acme'; model = 'Box 1'; maintenance = $false; baseline = @{ cpuUsagePct = 30; memUsagePct = 50 }
+                    vendor = 'Acme'; model = 'Box 1'; maintenance = $false; baseline = @{ cpuUsagePct = 30; memUsagePct = 50 }; config = [ordered]@{ htActive = 'True'; biosVersion = 'U30 v2.1' }
                     nics = @(@{ device = 'vmnic0'; driver = 'drv0'; speedMbps = 10000 }, @{ device = 'vmnic1'; driver = 'drv1'; speedMbps = 1000 }, @{ device = 'vmnic2'; driver = 'drv1'; speedMbps = 1000 })
                     hbas = @(@{ device = 'vmhba0'; driver = 'hbadrv' })
                     vmkernels = @(@{ device = 'vmk0'; network = 'net-dddd000001' })
@@ -106,7 +106,7 @@ BeforeAll {
                 @{ id = 'vss-ffff000002'; name = 'vss-ffff000002'; kind = 'standard'; datacenter = 'dc-aaaa000001'; mtu = 1500; ports = 128; hosts = @('esx-cccc000001') }
             )
             networks      = @(
-                @{ id = 'net-dddd000001'; name = 'net-dddd000001'; kind = 'distributed'; switch = 'dvs-ffff000001'; vlan = 120 }
+                @{ id = 'net-dddd000001'; name = 'net-dddd000001'; kind = 'distributed'; switch = 'dvs-ffff000001'; vlan = 120; config = [ordered]@{ allowPromiscuous = 'False' } }
                 @{ id = 'net-dddd000002'; name = 'net-dddd000002'; kind = 'standard'; switch = ''; datacenter = 'dc-aaaa000001'; vlan = 5; hosts = @('esx-cccc000001', 'esx-notinplan') }
             )
             folders       = @(
@@ -118,7 +118,7 @@ BeforeAll {
                 @{
                     id = 'vm-3333000001'; name = 'vm-3333000001'; powerState = 'poweredOn'; datacenter = 'dc-aaaa000001'; cluster = 'cluster-bbbb000001'
                     host = 'esx-cccc000001'; datastores = @('ds-eeee000001'); folderId = 'folder-1111000002'; resourcePoolId = 'rp-2222000001'
-                    guestOs = 'Microsoft Windows Server 2022 (64-bit)'; hardwareVersion = 19; toolsVersion = 12345
+                    guestOs = 'Microsoft Windows Server 2022 (64-bit)'; hardwareVersion = 19; toolsVersion = 12345; config = [ordered]@{ creationDate = '2024-01-02T03:04:05' }
                     cpu = @{ vcpus = 4; sockets = 2; coresPerSocket = 2; capacityMhz = 8000; usageMhz = 1000; reservationMhz = 0; limitMhz = $null }
                     memory = @{ sizeMiB = 8192; activeMiB = 2048; consumedMiB = 4096; reservationMiB = 0; limitMiB = $null }
                     baseline = @{ cpuUsagePct = 12.5; memActivePct = 25; perf = @{ readIopsAvg = 40; writeIopsAvg = 10; readLatencyAvgMs = 1.5 } }
@@ -361,6 +361,20 @@ Describe 'New-SynthSeedPlan' {
         Get-Entry $cluster.stats 'summary|total_number_hosts' | Should -Be 1
         $ds = Get-PlanObject $script:plan 'ds-eeee000001'
         Get-Entry $ds.stats 'capacity|used_space' | Should -Be 1
+    }
+
+    It 'maps RVTools configuration onto Operations properties' {
+        $cluster = Get-PlanObject $script:plan 'cluster-bbbb000001'
+        Get-Entry $cluster.properties 'configuration|dasConfig|admissionControlEnabled' | Should -Be 'true'
+        Get-Entry $cluster.properties 'configuration|dasConfig|hostFailoverLevel' | Should -Be '1'
+        Get-Entry $script:esx.properties 'config|hyperThread|active' | Should -Be 'true'
+        Get-Entry $script:esx.properties 'hardware|biosVersion' | Should -Be 'U30 v2.1'
+        Get-Entry $script:esx.properties 'runtime|connectionState' | Should -Be 'connected'
+        Get-Entry (Get-PlanObject $script:plan 'net-dddd000001').properties 'config|policies|security|allow_promiscuous' | Should -Be 'false'
+        Get-Entry $script:vm.properties 'config|createDate' | Should -Be '2024-01-02T03:04:05'
+        Get-Entry $script:vm.properties 'summary|config|isTemplate' | Should -Be 'false'
+        # No config record: the placeholder, not the rubric's value.
+        Get-Entry $script:linuxVm.properties 'config|createDate' | Should -Be '-'
     }
 
     It 'writes several tags, the synthetic marker and the project' {

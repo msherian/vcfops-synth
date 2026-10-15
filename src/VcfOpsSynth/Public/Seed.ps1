@@ -259,6 +259,9 @@ function New-SynthSeedPlan {
         # A rubric only says which keys a kind has: every value comes from the inventory, is derived from it, or is a neutral placeholder.
         $hasRubric = $Rubric.ContainsKey($kind)
         $kindRubric = if ($hasRubric) { $Rubric[$kind] } else { @{ latest = @(); properties = @() } }
+        # RVTools configuration the inventory kept for this object (HA/DRS, port group policies, host hardware, ...).
+        $fromConfig = Get-SynthConfigProperty -Kind $kind -Item $item
+        foreach ($key in $fromConfig.Keys) { if (-not $set.Contains($key)) { $set[$key] = $fromConfig[$key] } }
         foreach ($key in $tagSet.Keys) { $set[$key] = $tagSet[$key] }
         if ($vcenterName -and @($kindRubric.properties | Where-Object { $_.name -eq 'summary|parentVcenter' }).Count) { $set['summary|parentVcenter'] = $vcenterName }
         if (-not $prepared.ContainsKey($kind)) {

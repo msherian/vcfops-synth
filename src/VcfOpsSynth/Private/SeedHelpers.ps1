@@ -305,6 +305,7 @@ function Get-SynthDerivedStat {
         a datastore's capacity and use. Keys not answered here are left to the
         placeholder (0). Only keys the kind's rubric lists are ever used.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Context', Justification = 'Used inside the children script block, which the rule does not follow.')]
     [CmdletBinding()]
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param(
@@ -324,6 +325,8 @@ function Get-SynthDerivedStat {
     $hostMemKb = { param($h) (& $num $h.memoryMiB) * 1024 }
     $hostUsedKb = { param($h) (& $num (& $base $h 'memUsagePct')) / 100 * (& $hostMemKb $h) }
     $vmOn = { param($v) $v.powerState -eq 'poweredOn' }
+    # An object with no children of a kind has no entry in the index: an empty list, not one $null.
+    $children = { param($map) if ($Item.id -and $Context[$map].ContainsKey($Item.id)) { ,@($Context[$map][$Item.id]) } else { ,@() } }
     $pct = { param($part, $whole) if ($whole -gt 0) { [math]::Round($part / $whole * 100, 2) } else { 0 } }
 
     switch ($Kind) {
@@ -369,7 +372,7 @@ function Get-SynthDerivedStat {
             }
         }
         'HostSystem' {
-            $vms = @($Context.vmsByHost[$Item.id])
+            $vms = (& $children 'vmsByHost')
             $capMhz = & $hostCapMhz $Item
             $usedMhz = & $hostUsedMhz $Item
             $d['cpu|usage_average'] = & $num (& $base $Item 'cpuUsagePct'); $d['cpu|demandPct'] = $d['cpu|usage_average']
@@ -386,7 +389,7 @@ function Get-SynthDerivedStat {
             $d['summary|total_number_vms'] = $vms.Count
             $d['summary|number_running_vms'] = @($vms | Where-Object { & $vmOn $_ }).Count
             $d['summary|number_running_vcpus'] = & $sum $vms { param($v) if (& $vmOn $v) { & $num $v.cpu.vcpus } else { 0 } }
-            $d['summary|total_number_datastores'] = @($Context.datastoresByHost[$Item.id]).Count
+            $d['summary|total_number_datastores'] = (& $children 'datastoresByHost').Count
             $perf = & $base $Item 'perf'
             if ($perf) {
                 $d['storage|commandsAveraged_average'] = & $num (& $pf 'iopsAvg')
@@ -396,8 +399,8 @@ function Get-SynthDerivedStat {
             }
         }
         { $_ -in 'ClusterComputeResource', 'Datacenter' } {
-            $hosts = @(if ($Kind -eq 'Datacenter') { $Context.hostsByDatacenter[$Item.id] } else { $Context.hostsByCluster[$Item.id] })
-            $vms = @(if ($Kind -eq 'Datacenter') { $Context.vmsByDatacenter[$Item.id] } else { $Context.vmsByCluster[$Item.id] })
+            $hosts = @(if ($Kind -eq 'Datacenter') { (& $children 'hostsByDatacenter') } else { (& $children 'hostsByCluster') })
+            $vms = @(if ($Kind -eq 'Datacenter') { (& $children 'vmsByDatacenter') } else { (& $children 'vmsByCluster') })
             $capMhz = & $sum $hosts $hostCapMhz
             $usedMhz = & $sum $hosts $hostUsedMhz
             $memKb = & $sum $hosts $hostMemKb
@@ -419,8 +422,8 @@ function Get-SynthDerivedStat {
             $d['summary|vm_count_per_host'] = if ($hosts.Count) { [math]::Round($vms.Count / $hosts.Count, 2) } else { 0 }
             $d['summary|avg_vm_density'] = $d['summary|vm_count_per_host']
             if ($Kind -eq 'Datacenter') {
-                $d['summary|total_number_clusters'] = @($Context.clustersByDatacenter[$Item.id]).Count
-                $d['summary|total_number_datastores'] = @($Context.datastoresByDatacenter[$Item.id]).Count
+                $d['summary|total_number_clusters'] = (& $children 'clustersByDatacenter').Count
+                $d['summary|total_number_datastores'] = (& $children 'datastoresByDatacenter').Count
             }
         }
         'Datastore' {
@@ -434,10 +437,107 @@ function Get-SynthDerivedStat {
             $d['capacity|provisioned'] = [math]::Round($provGb, 2); $d['capacity|consumer_provisioned'] = $d['capacity|provisioned']
             $d['diskspace|diskspace_overcommit_ratio'] = if ($capGb -gt 0) { [math]::Round($provGb / $capGb, 2) } else { 0 }
             $d['summary|total_number_hosts'] = @($Item.hosts).Count
-            $d['summary|total_number_vms'] = @($Context.vmsByDatastore[$Item.id]).Count
+            $d['summary|total_number_vms'] = (& $children 'vmsByDatastore').Count
         }
     }
     $d
+}
+
+function Get-SynthConfigProperty {
+    <#
+    .SYNOPSIS
+        Operations property values an object's RVTools config record answers for.
+
+    .DESCRIPTION
+        Maps the cfg* columns the importer kept (see Get-SynthRvConfig) to the
+        property keys Operations uses for each kind: host hardware, hyperthreading,
+        power policy and UUID; cluster HA, DRS and DPM settings; datastore
+        accessibility; port group security and override policies; VM creation
+        date, consolidation and connection state. RVTools booleans become
+        'true'/'false'. A few values follow from how the importer works: templates
+        and SRM placeholders are never imported, and every host it lists is
+        connected and powered on.
+    #>
+    [CmdletBinding()]
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    param(
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Item
+    )
+
+    $config = if ($Item.Contains('config') -and $Item.config -is [System.Collections.IDictionary]) { $Item.config } else { @{} }
+    $out = [ordered]@{}
+    $flag = {
+        param($v)
+        if ($v -is [bool]) { return ([string]$v).ToLowerInvariant() }
+        $t = ([string]$v).Trim()
+        if ($t -match '^(?i:true|yes|enabled|on)$') { 'true' } elseif ($t -match '^(?i:false|no|disabled|off)$') { 'false' } else { $t }
+    }
+    # Operations key = config field; a leading ! marks a flag, written as true/false.
+    $maps = @{
+        HostSystem = [ordered]@{
+            'config|hyperThread|available' = '!htAvailable'
+            'config|hyperThread|active' = '!htActive'
+            'hardware|biosVersion' = 'biosVersion'
+            'hardware|serialNumberTag' = 'serial'
+            'hardware|serviceTag' = 'serviceTag'
+            'hardware|powerManagementPolicy' = 'powerPolicy'
+            'hardware|memoryTieringType' = 'memoryTiering'
+            'summary|hostuuid' = 'uuid'
+            'runtime|quarantineState' = '!quarantine'
+            'sys|licenseProductName' = 'license'
+        }
+        ClusterComputeResource = [ordered]@{
+            'configuration|dasConfig|admissionControlEnabled' = '!admissionControl'
+            'configuration|dasConfig|hostFailoverLevel' = 'failoverLevel'
+            'configuration|dasConfig|hostMonitoring' = 'hostMonitoring'
+            'configuration|dasConfig|vmMonitoring' = 'vmMonitoring'
+            'configuration|drsConfig|defaultVmBehavior' = 'drsBehavior'
+            'configuration|drsConfig|vmotionRate' = 'drsRate'
+            'configuration|dpmConfiginfo|enabled' = '!dpmEnabled'
+            'configuration|dpmConfiginfo|defaultDpmBehavior' = 'dpmBehavior'
+        }
+        Datastore = [ordered]@{
+            'summary|accessible' = '!accessible'
+        }
+        DistributedVirtualPortgroup = [ordered]@{
+            'config|policies|security|allow_promiscuous' = '!allowPromiscuous'
+            'config|policies|security|mac_changes' = '!macChanges'
+            'config|policies|security|forged_transmits' = '!forgedTransmits'
+            'config|policies|override|block_override_allowed' = '!blockOverride'
+            'config|policies|override|port_config_reset_at_disconnect' = '!configReset'
+            'config|policies|override|shaping_override_allowed' = '!shapingOverride'
+            'config|policies|override|vendor_config_override_allowed' = '!vendorConfigOverride'
+            'config|policies|override|security_policy_override_allowed' = '!secPolicyOverride'
+            'config|policies|override|uplink_teaming_override_allowed' = '!teamingOverride'
+            'config|policies|override|vlan_override_allowed' = '!vlanOverride'
+            'config|policies|override|live_port_moving_allowed' = '!livePortMoving'
+            'summary|active_uplink_ports' = 'activeUplink'
+        }
+        VirtualMachine = [ordered]@{
+            'config|createDate' = 'creationDate'
+            'config|disk_consolidation_needed' = '!consolidationNeeded'
+            'summary|runtime|connectionState' = 'connectionState'
+        }
+    }
+    $map = if ($maps.ContainsKey($Kind)) { $maps[$Kind] } else { @{} }
+    foreach ($key in $map.Keys) {
+        $field = $map[$key].TrimStart('!')
+        if (-not $config.Contains($field)) { continue }
+        $out[$key] = if ($map[$key].StartsWith('!')) { & $flag $config[$field] } else { [string]$config[$field] }
+    }
+    switch ($Kind) {
+        'HostSystem' {
+            $out['runtime|connectionState'] = 'connected'
+            $out['runtime|powerState'] = 'poweredOn'
+            if ([string]$Item.esxVersion -match 'ESXi') { $out['sys|productString'] = 'VMware ESXi'; $out['config|product|productLineId'] = 'embeddedEsx' }
+        }
+        'VirtualMachine' {
+            $out['summary|config|isTemplate'] = 'false'
+            $out['summary|config|isSrmPlaceholder'] = 'false'
+        }
+    }
+    $out
 }
 
 function Get-SynthDerivationContext {
