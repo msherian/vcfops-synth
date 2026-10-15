@@ -408,6 +408,8 @@ Describe 'Invoke-SynthSeed' {
                 'Datacenter' { @(New-TestResource 'ops-dc-existing' 'dc-aaaa000001' 'VMEntityObjectID' 'datacenter-synth-aaaa000001') }
                 'HostSystem' { @((New-TestResource 'ops-esx-existing' 'old-esx-name' 'VMEntityObjectID' 'host-synth-cccc000001'), (New-TestResource 'ops-other' 'esx-other' 'VMEntityObjectID' 'host-42')) }
                 'VirtualMachine' { @(New-TestResource 'ops-real-vm' 'vm-3333000001' 'VMEntityObjectID' 'vm-1001') }
+                # Operations stores names with runs of spaces collapsed.
+                'VMFolder' { @(New-TestResource 'ops-folder-existing' ' folder-1111000001 ' 'VMEntityObjectID' 'group-v-synth-1111000001') }
                 default { @() }
             }
             [pscustomobject]@{ resourceList = $existing; pageInfo = [pscustomobject]@{ totalCount = @($existing).Count } }
@@ -428,7 +430,8 @@ Describe 'Invoke-SynthSeed' {
         # The real VM with the same name is not mistaken for the planned one.
         $result.created.VirtualMachine | Should -Be 2
         $result.ids['vm-3333000001'] | Should -Not -Be 'ops-real-vm'
-        $result.created.VMFolder | Should -Be 2
+        $result.created.VMFolder | Should -Be 1
+        $result.existing.VMFolder | Should -Be 1
         $result.failed.Count | Should -Be 0
         $result.ids['dc-aaaa000001'] | Should -Be 'ops-dc-existing'
         $result.ids['esx-cccc000001'] | Should -Be 'ops-esx-existing'
@@ -440,10 +443,10 @@ Describe 'Invoke-SynthSeed' {
         $null = Invoke-SynthSeed -Plan $script:plan -AdapterInstanceId 'adapter-1'
 
         $creates = @($script:posts | Where-Object { $_.Path -like 'resources/adapters/*' -or $_.Path -like 'resources/adapterkinds/*' })
-        $creates.Count | Should -Be 11
+        $creates.Count | Should -Be 10
         $native = @($creates | Where-Object { $_.Path -eq 'resources/adapters/adapter-1' })
         $custom = @($creates | Where-Object { $_.Path -eq 'resources/adapterkinds/VcfOpsSynth' })
-        $native.Count | Should -Be 9
+        $native.Count | Should -Be 8
         @($custom | ForEach-Object { $_.Body.resourceKey.resourceKindKey }) | Should -Be @('StandardSwitch', 'StandardPortgroup')
         @($custom | ForEach-Object { $_.Body.resourceKey.adapterKindKey }) | Should -Be @('VcfOpsSynth', 'VcfOpsSynth')
         $kinds = [System.Collections.Generic.List[string]]@($creates | ForEach-Object { $_.Body.resourceKey.resourceKindKey })
@@ -456,9 +459,9 @@ Describe 'Invoke-SynthSeed' {
     It 'pushes stats where there are any, properties always, text as values' {
         $null = Invoke-SynthSeed -Plan $script:plan -AdapterInstanceId 'adapter-1'
 
-        # Eleven created; the Physical Data Center and the two standard objects have no rubric stats.
-        @($script:posts | Where-Object { $_.Path -like 'resources/*/stats' }).Count | Should -Be 8
-        @($script:posts | Where-Object { $_.Path -like 'resources/*/properties' }).Count | Should -Be 11
+        # Ten created; the Physical Data Center and the two standard objects have no rubric stats.
+        @($script:posts | Where-Object { $_.Path -like 'resources/*/stats' }).Count | Should -Be 7
+        @($script:posts | Where-Object { $_.Path -like 'resources/*/properties' }).Count | Should -Be 10
         $vmStats = @($script:posts | Where-Object { $_.Path -eq 'resources/ops-VirtualMachine-vm-3333000001/stats' })[0].Body.'stat-content'
         $tools = @($vmStats | Where-Object { $_.statKey -eq 'guest|tools_status' })[0]
         $tools.values | Should -Be @('toolsOk')

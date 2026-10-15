@@ -402,7 +402,8 @@ function Invoke-SynthSeed {
             if ($match) {
                 $ids[$object.key] = $match.id
                 $result.existing[$kind]++
-                if ($match.name -ne $object.name) { $result.renamed.Add("$kind '$($match.name)' is planned as '$($object.name)'; delete it to reseed under the new name") }
+                # Operations collapses runs of spaces in names, so only a difference beyond that counts.
+                if (($match.name -replace '\s+', ' ').Trim() -ne ($object.name -replace '\s+', ' ').Trim()) { $result.renamed.Add("$kind '$($match.name)' is planned as '$($object.name)'; delete it to reseed under the new name") }
                 continue
             }
             if (-not $PSCmdlet.ShouldProcess("$kind $($object.name)", 'Create')) { continue }
