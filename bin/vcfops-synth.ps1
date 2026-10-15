@@ -35,10 +35,20 @@
                           --adapter <name>   vCenter adapter instance (default seed.adapterInstance)
                           --dry-run          build and summarise the plan; create nothing
                           --refresh          also push planned properties and current stats to objects already there
+        backfill          Pushes backfillDays of history at intervalMinutes for every numeric stat key of the
+                          seeded objects, with analytics processing off. Keys with LiveOptics figures match
+                          their average and peak; the rest follow each object's workload curve around its
+                          current value, grow (space in use), stay flat (capacity) or stay at zero. A host,
+                          cluster or datastore follows the sum of its VMs' curves. Resumes from paths.state.
+                          --days <n>         days of history (default backfillDays)
+                          --kinds <a,b>      only these kinds (VirtualMachine, HostSystem, ...)
+                          --max-vms <n>      only the first n VMs by key, for a pilot
+                          --concurrency <n>  objects posted at once (default 4)
+                          --restart          forget saved progress and start over on a new range
+                          --dry-run          count objects, series and samples; push nothing
 
     Commands still to come, by build phase:
         reset             Phase 3   Remove the objects seed created
-        backfill          Phase 4   Push generated history
         content           Phase 5-7 Groups, policies, alerts, dashboards
         feed, scenario    Phase 6   Live metrics and scenario overlays
         live-load         Phase 9   Optional UPSA and load VMs
@@ -79,7 +89,6 @@ $toolVersion = (Import-PowerShellDataFile -Path $moduleRoot).ModuleVersion
 
 $planned = [ordered]@{
     'reset'     = 3
-    'backfill'  = 4
     'content'   = 5
     'feed'      = 6
     'scenario'  = 6
@@ -104,7 +113,7 @@ function ConvertTo-RedactedConfig {
 }
 
 # Commands that read their own arguments; every other built command refuses them rather than ignore a typo.
-$takesArguments = @('import', 'seed')
+$takesArguments = @('import', 'seed', 'backfill')
 
 function Read-ImportArgument {
     param([string[]]$Argument)
@@ -126,6 +135,46 @@ function Read-ImportArgument {
                 if ($parsed.Source) { throw [System.ArgumentException]::new("import takes one source; got '$($parsed.Source)' and '$arg'.") }
                 $parsed.Source = $arg
             }
+        }
+    }
+    $parsed
+}
+
+function New-CliSeedPlan {
+    # The seed plan both seed and backfill work from, with the synthetic and project tags.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds a plan in memory.')]
+    param($Config, $Inventory, $Rubrics, $Target)
+    # The synthetic marker, then the project: seed.project, else the project folder the import came from.
+    $tags = @(@{ Category = $Config.seed.tag.category; Name = $Config.seed.tag.name })
+    $project = if ($Config.seed.project) { $Config.seed.project } elseif ($Inventory.source -and $Inventory.source.Contains('project')) { $Inventory.source.project } else { $null }
+    if ($project) { $tags += @{ Category = 'Project'; Name = $project } }
+    $plan = New-SynthSeedPlan -Inventory $Inventory -Rubric $Rubrics -VcId $Target.VcId -Prefix $Config.seed.prefix -Tag $tags -CustomAdapterKind $Config.adapterKind.key -PhysicalDatacenter $Config.seed.physicalDatacenter
+    @{ Plan = $plan; Tags = $tags }
+}
+
+function Read-BackfillArgument {
+    param([string[]]$Argument)
+    if (-not $Argument) { $Argument = @() }
+    $parsed = @{ Days = $null; Kinds = @(); MaxVms = 0; Concurrency = 4; Restart = $false; DryRun = $false }
+    $number = {
+        param($name, $index)
+        if ($index -ge $Argument.Count -or $Argument[$index] -notmatch '^\d+$' -or [int]$Argument[$index] -lt 1) { throw [System.ArgumentException]::new("$name needs a whole number of at least 1.") }
+        [int]$Argument[$index]
+    }
+    for ($i = 0; $i -lt $Argument.Count; $i++) {
+        $arg = $Argument[$i]
+        switch -Regex ($arg) {
+            '^--days$' { $parsed.Days = & $number $arg (++$i); break }
+            '^--max-vms$' { $parsed.MaxVms = & $number $arg (++$i); break }
+            '^--concurrency$' { $parsed.Concurrency = & $number $arg (++$i); break }
+            '^--kinds$' {
+                if ($i + 1 -ge $Argument.Count) { throw [System.ArgumentException]::new("$arg needs a comma-separated list of kinds.") }
+                $parsed.Kinds = @($Argument[++$i] -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                break
+            }
+            '^--restart$' { $parsed.Restart = $true; break }
+            '^--dry-run$' { $parsed.DryRun = $true; break }
+            default { throw [System.ArgumentException]::new("Unknown option '$arg' for backfill.") }
         }
     }
     $parsed
@@ -272,12 +321,9 @@ try {
             $null = Connect-SynthOps -Config $config
             try {
                 $target = Resolve-SynthSeedTarget -Name $adapterName
-                # The synthetic marker, then the project: seed.project, else the project folder the import came from.
-                $tags = @(@{ Category = $config.seed.tag.category; Name = $config.seed.tag.name })
-                $project = if ($config.seed.project) { $config.seed.project } elseif ($inventory.source -and $inventory.source.Contains('project')) { $inventory.source.project } else { $null }
-                if ($project) { $tags += @{ Category = 'Project'; Name = $project } }
-                $plan = New-SynthSeedPlan -Inventory $inventory -Rubric $rubrics -VcId $target.VcId -Prefix $config.seed.prefix -Tag $tags -CustomAdapterKind $config.adapterKind.key -PhysicalDatacenter $config.seed.physicalDatacenter
-                Write-Host "Tags: $(($tags | ForEach-Object { "$($_.Category): $($_.Name)" }) -join '; ')"
+                $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target
+                $plan = $built.Plan
+                Write-Host "Tags: $(($built.Tags | ForEach-Object { "$($_.Category): $($_.Name)" }) -join '; ')"
                 $objects = @($plan.objects)
                 Write-Host "Seed plan for adapter instance $adapterName ($($target.AdapterInstanceId)), vCenter $($target.VcId):"
                 $objects | Group-Object { $_.kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count)" }
@@ -304,6 +350,63 @@ try {
             }
             # Stale names mean Ops does not match the plan, so later phases should not carry on as if it did.
             exit $(if ($result.failed.Count -or $result.renamed.Count) { 1 } else { 0 })
+        }
+
+        'backfill' {
+            try { $options = Read-BackfillArgument -Argument $Arguments }
+            catch [System.ArgumentException] {
+                Write-Host "$($_.Exception.Message) Run 'help' for usage."
+                exit 2
+            }
+            $config = Get-SynthConfig -Path $ConfigPath
+            $adapterName = $config.seed.adapterInstance
+            if (-not $adapterName) { throw 'No vCenter adapter instance to backfill under. Set seed.adapterInstance in lab.json.' }
+            $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
+            $inventory = Get-SynthInventory -Path $config.paths.inventory
+            $rubrics = Get-SynthRubric -Path $rubricPath
+            $days = if ($options.Days) { $options.Days } else { $config.backfillDays }
+            $range = Get-SynthBackfillRange -Days $days -IntervalMinutes $config.intervalMinutes
+
+            $null = Connect-SynthOps -Config $config
+            try {
+                $target = Resolve-SynthSeedTarget -Name $adapterName
+                $plan = (New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target).Plan
+                if ($options.Kinds.Count) {
+                    $unknown = @($options.Kinds | Where-Object { $_ -notin @($plan.objects | ForEach-Object { $_.kind }) })
+                    if ($unknown.Count) { Write-Host "No planned objects of kind $($unknown -join ', '). Run 'help' for usage."; exit 2 }
+                    $plan.objects = @($plan.objects | Where-Object { $_.kind -in $options.Kinds })
+                }
+                if ($options.MaxVms) {
+                    $keep = @($plan.objects | Where-Object { $_.kind -eq 'VirtualMachine' } | Sort-Object { $_.key } | Select-Object -First $options.MaxVms | ForEach-Object { $_.key })
+                    $plan.objects = @($plan.objects | Where-Object { $_.kind -ne 'VirtualMachine' -or $_.key -in $keep })
+                }
+                $ids = Resolve-SynthPlanId -Plan $plan -AdapterInstanceId $target.AdapterInstanceId
+                $missing = @($plan.objects | Where-Object { -not $ids.ContainsKey($_.key) }).Count
+                $spec = @(New-SynthBackfillSpec -Plan $plan -Inventory $inventory -Ids $ids)
+                $series = ($spec | ForEach-Object { $_.Series.Count } | Measure-Object -Sum).Sum
+                $samples = [long]$series * $range.Points
+                $from = [DateTimeOffset]::FromUnixTimeMilliseconds($range.StartMs).ToString('u')
+                $to = [DateTimeOffset]::FromUnixTimeMilliseconds($range.EndMs).ToString('u')
+                Write-Host "Backfill for adapter instance ${adapterName}: $days days at $($config.intervalMinutes) minutes, $from to $to ($($range.Points) points)"
+                $spec | Group-Object { ($plan.objects | Where-Object key -eq $_.Key | Select-Object -First 1).kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count) objects, $(($_.Group | ForEach-Object { $_.Series.Count } | Measure-Object -Sum).Sum) series" }
+                Write-Host ('  {0} objects, {1:N0} series, {2:N0} samples (about {3:N1} GB of JSON)' -f $spec.Count, $series, $samples, ($samples * 19 / 1e9))
+                if ($missing) { Write-Host "  $missing planned objects are not in Operations; run seed first. They are skipped." }
+                if ($options.DryRun) {
+                    Write-Host 'Dry run: nothing was pushed.'
+                    exit 0
+                }
+                if ($options.Restart -and (Test-Path -LiteralPath $config.paths.state)) {
+                    $state = Get-Content -LiteralPath $config.paths.state -Raw | ConvertFrom-Json -AsHashtable
+                    if ($state -and $state.ContainsKey('backfill')) { $state.Remove('backfill'); $state | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $config.paths.state -Encoding utf8 }
+                }
+                $result = Invoke-SynthBackfill -Spec $spec -Range $range -StatePath $config.paths.state -TimeZone $config.timeZone -Concurrency $options.Concurrency -Verbose
+                Write-Host ('  {0} objects pushed, {1:N0} samples in {2:N0} calls, {3} s ({4:N0} samples/s); {5} already done' -f $result.objects, $result.samples, $result.calls, $result.seconds, $(if ($result.seconds) { $result.samples / $result.seconds } else { 0 }), $result.skipped)
+                foreach ($failure in $result.failed) { Write-Host "Failed: $failure" }
+            }
+            finally {
+                Disconnect-SynthOps -Confirm:$false
+            }
+            exit $(if ($result.failed.Count) { 1 } else { 0 })
         }
 
         { $planned.Contains($_) } {
