@@ -24,11 +24,14 @@
                           --perf <path>      LiveOptics VMware workbook: per-VM and per-host
                                              averages and peaks (default import.performance)
                           --no-anonymise     keep real names; only for exports you may share as is
-        seed              Creates the inventory in VCF Operations as VMWARE objects under a vCenter
-                          adapter instance: datacenters, clusters, hosts, datastores, distributed
-                          switches and port groups, VM folders and VMs, each with every metric and
-                          property of its kind's rubric, linked to its synthetic parents only.
-                          Objects that already exist by name are skipped.
+        seed              Creates the inventory in VCF Operations under a vCenter adapter instance,
+                          foundations first: an optional Physical Data Center (seed.physicalDatacenter),
+                          datacenters, clusters, datastores, hosts, distributed and standard switches,
+                          port groups, VM folders and VMs. Objects keep their inventory names and carry
+                          the seed.tag vSphere tag; VMWARE kinds get every metric and property of their
+                          rubric. Standard switches and port groups go under the toolset's adapter kind.
+                          Every relationship is worked out first, datacenters go under the vCenter, and
+                          objects that already exist (by identifier) are skipped.
                           --adapter <name>   vCenter adapter instance (default seed.adapterInstance)
                           --dry-run          build and summarise the plan; create nothing
 
@@ -267,13 +270,14 @@ try {
             $null = Connect-SynthOps -Config $config
             try {
                 $target = Resolve-SynthSeedTarget -Name $adapterName
-                $plan = New-SynthSeedPlan -Inventory $inventory -Rubric $rubrics -VcId $target.VcId -Prefix $config.prefix
+                $plan = New-SynthSeedPlan -Inventory $inventory -Rubric $rubrics -VcId $target.VcId -Prefix $config.seed.prefix -Tag @{ Category = $config.seed.tag.category; Name = $config.seed.tag.name } -CustomAdapterKind $config.adapterKind.key -PhysicalDatacenter $config.seed.physicalDatacenter
                 $objects = @($plan.objects)
                 Write-Host "Seed plan for adapter instance $adapterName ($($target.AdapterInstanceId)), vCenter $($target.VcId):"
                 $objects | Group-Object { $_.kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count)" }
                 $edges = ($plan.links | ForEach-Object { @($_.children).Count } | Measure-Object -Sum).Sum
                 Write-Host "  $($objects.Count) objects, $edges links"
-                Write-Host "  Not created (no VMWARE kind): $($plan.skipped.standardNetworks) standard port groups, $($plan.skipped.standardSwitches) standard switches, $($plan.skipped.resourcePools) resource pools"
+                Write-Host "  Not created: $($plan.skipped.rootResourcePools) root resource pools (not shown in Operations)"
+                if ($plan.skipped.userResourcePools) { Write-Host "  Not created yet: $($plan.skipped.userResourcePools) user-created resource pools" }
                 if ($options.DryRun) {
                     Write-Host 'Dry run: nothing was created.'
                     exit 0
@@ -284,6 +288,7 @@ try {
                     Write-Host "  $($kind): $($result.created[$kind]) created, $($result.existing[$kind]) already there"
                 }
                 Write-Host "  $($result.links) links made"
+                foreach ($note in $result.renamed) { Write-Host "Not renamed: $note" }
                 foreach ($failure in $result.failed) { Write-Host "Failed: $failure" }
             }
             finally {

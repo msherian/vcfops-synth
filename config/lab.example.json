@@ -27,7 +27,10 @@
   },
   "seed": {
     "adapterInstance": "vc-mgmt-a",
-    "rubrics": ""
+    "rubrics": "",
+    "prefix": "",
+    "tag": { "category": "vcfops-synth", "name": "synthetic" },
+    "physicalDatacenter": "Synthetic Physical Datacenter"
   },
   "liveLoad": {
     "enabled": false,

@@ -103,11 +103,11 @@ BeforeAll {
             datastores    = @(@{ id = 'ds-eeee000001'; name = 'ds-eeee000001'; type = 'VMFS'; capacityMiB = 2048; hosts = @('esx-cccc000001') })
             switches      = @(
                 @{ id = 'dvs-ffff000001'; name = 'dvs-ffff000001'; kind = 'distributed'; datacenter = 'dc-aaaa000001'; version = '8.0.0'; hosts = @('esx-cccc000001', 'esx-notinplan') }
-                @{ id = 'vss-ffff000002'; name = 'vss-ffff000002'; kind = 'standard' }
+                @{ id = 'vss-ffff000002'; name = 'vss-ffff000002'; kind = 'standard'; datacenter = 'dc-aaaa000001'; mtu = 1500; ports = 128; hosts = @('esx-cccc000001') }
             )
             networks      = @(
                 @{ id = 'net-dddd000001'; name = 'net-dddd000001'; kind = 'distributed'; switch = 'dvs-ffff000001'; vlan = 120 }
-                @{ id = 'net-dddd000002'; name = 'net-dddd000002'; kind = 'standard'; switch = ''; vlan = 5 }
+                @{ id = 'net-dddd000002'; name = 'net-dddd000002'; kind = 'standard'; switch = ''; datacenter = 'dc-aaaa000001'; vlan = 5; hosts = @('esx-cccc000001', 'esx-notinplan') }
             )
             folders       = @(
                 @{ id = 'folder-1111000001'; name = 'folder-1111000001'; datacenter = 'dc-aaaa000001'; parent = '' }
@@ -154,7 +154,7 @@ BeforeAll {
 
 Describe 'New-SynthSeedPlan' {
     BeforeAll {
-        $script:plan = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001'
+        $script:plan = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001' -Prefix 'Synth-' -PhysicalDatacenter 'Test PDC'
         $script:vm = Get-PlanObject $script:plan 'vm-3333000001'
         $script:linuxVm = Get-PlanObject $script:plan 'vm-3333000002'
         $script:esx = Get-PlanObject $script:plan 'esx-cccc000001'
@@ -169,11 +169,64 @@ Describe 'New-SynthSeedPlan' {
         $counts.Datastore | Should -Be 1
         $counts.VmwareDistributedVirtualSwitch | Should -Be 1
         $counts.DistributedVirtualPortgroup | Should -Be 1
+        $counts.StandardSwitch | Should -Be 1
+        $counts.StandardPortgroup | Should -Be 1
+        $counts.PhysicalDatacenter | Should -Be 1
         $counts.VMFolder | Should -Be 2
         $counts.VirtualMachine | Should -Be 2
-        $script:plan.skipped.standardNetworks | Should -Be 1
-        $script:plan.skipped.standardSwitches | Should -Be 1
-        $script:plan.skipped.resourcePools | Should -Be 1
+        $script:plan.skipped.rootResourcePools | Should -Be 1
+        $script:plan.skipped.userResourcePools | Should -Be 0
+    }
+
+    It 'counts user-created resource pools apart from root pools, and creates neither' {
+        $inventory = New-TestInventory
+        $inventory.resourcePools += Complete-TestInventory @{ resourcePools = @(@{ id = 'rp-2222000002'; name = 'rp-2222000002'; cluster = 'cluster-bbbb000001'; parent = 'rp-2222000001' }) } | ForEach-Object { $_.resourcePools }
+        $plan = New-SynthSeedPlan -Inventory $inventory -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001'
+        $plan.skipped.rootResourcePools | Should -Be 1
+        $plan.skipped.userResourcePools | Should -Be 1
+        @($plan.objects | Where-Object { $_.key -like 'rp-*' }).Count | Should -Be 0
+    }
+
+    It 'keeps inventory names exactly by default' {
+        $plain = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001'
+        (Get-PlanObject $plain 'vm-3333000001').name | Should -Be 'vm-3333000001'
+        Get-Entry (Get-PlanObject $plain 'esx-cccc000001').properties 'summary|parentCluster' | Should -Be 'cluster-bbbb000001'
+        Get-Entry (Get-PlanObject $plain 'vm-3333000001').properties 'net:4000|portGroup' | Should -Be 'net-dddd000001'
+        @($plain.objects | Where-Object kind -eq 'PhysicalDatacenter').Count | Should -Be 0
+    }
+
+    It 'tags every object as synthetic, rubric or not' {
+        foreach ($o in $script:plan.objects) {
+            Get-Entry $o.properties 'summary|tag' | Should -Be '[<vcfops-synth-synthetic>]' -Because "$($o.kind) $($o.name)"
+            (Get-Entry $o.properties 'summary|tagJson' | ConvertFrom-Json).name | Should -Be 'synthetic'
+        }
+        $other = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001' -Tag @{ Category = 'Lab'; Name = 'Fake' }
+        Get-Entry (Get-PlanObject $other 'vm-3333000001').properties 'summary|tag' | Should -Be '[<Lab-Fake>]'
+    }
+
+    It 'puts standard switches and port groups under the custom adapter kind with inventory properties' {
+        $vss = Get-PlanObject $script:plan 'vss-ffff000002'
+        $pg = Get-PlanObject $script:plan 'net-dddd000002'
+        $vss.adapterKind | Should -Be 'VcfOpsSynth'
+        $pg.adapterKind | Should -Be 'VcfOpsSynth'
+        $script:vm.adapterKind | Should -Be 'VMWARE'
+        $vss.identifiers | Should -HaveCount 1
+        $vss.identifiers[0].name | Should -Be 'SynthId'
+        $vss.identifiers[0].value | Should -Be 'vss-ffff000002'
+        $vss.stats | Should -HaveCount 0
+        Get-Entry $vss.properties 'config|mtu' | Should -Be 1500
+        Get-Entry $vss.properties 'summary|parentHost' | Should -Be 'Synth-esx-cccc000001'
+        Get-Entry $pg.properties 'config|policies|security|vlan_id' | Should -Be '5'
+        Get-Entry $pg.properties 'config|name' | Should -Be 'Synth-net-dddd000002'
+    }
+
+    It 'adds a Physical Data Center with no identifiers when one is named' {
+        $pdc = Get-PlanObject $script:plan 'pdc-synth'
+        $pdc.kind | Should -Be 'PhysicalDatacenter'
+        $pdc.adapterKind | Should -Be 'VMWARE'
+        $pdc.name | Should -Be 'Synth-Test PDC'
+        @($pdc.identifiers).Count | Should -Be 0
+        $script:plan.objects[0].kind | Should -Be 'PhysicalDatacenter'
     }
 
     It 'names every object with the prefix and gives it a vCenter-style ID' {
@@ -204,7 +257,7 @@ Describe 'New-SynthSeedPlan' {
     }
 
     It 'is stable: the same inventory gives the same identifiers' {
-        $again = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001'
+        $again = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001' -Prefix 'Synth-' -PhysicalDatacenter 'Test PDC'
         ((Get-PlanObject $again 'vm-3333000001').identifiers | ConvertTo-Json -Compress) | Should -Be ($script:vm.identifiers | ConvertTo-Json -Compress)
     }
 
@@ -278,7 +331,7 @@ Describe 'New-SynthSeedPlan' {
     }
 
     It 'links only objects in the plan, parents to children' {
-        $keys = @($script:plan.objects | ForEach-Object { $_.key })
+        $keys = @($script:plan.objects | ForEach-Object { $_.key }) + '@vcenter'
         foreach ($entry in $script:plan.links) {
             $keys | Should -Contain $entry.parent
             foreach ($child in $entry.children) { $keys | Should -Contain $child }
@@ -292,7 +345,11 @@ Describe 'New-SynthSeedPlan' {
         $childrenOf['esx-cccc000001'] | Should -Contain 'vm-3333000001'
         $childrenOf['dvs-ffff000001'] | Should -Be @('net-dddd000001')
         $childrenOf['net-dddd000001'] | Should -Be @('vm-3333000001')
-        $childrenOf.Keys | Should -Not -Contain 'net-dddd000002'
+        $childrenOf['@vcenter'] | Should -Be @('dc-aaaa000001')
+        $childrenOf['pdc-synth'] | Should -Be @('dc-aaaa000001')
+        $childrenOf['esx-cccc000001'] | Should -Contain 'vss-ffff000002'
+        $childrenOf['esx-cccc000001'] | Should -Contain 'net-dddd000002'
+        $childrenOf['net-dddd000002'] | Should -Be @('vm-3333000001')
         $childrenOf.Keys | Should -Not -Contain 'esx-notinplan'
         $childrenOf.Keys | Should -Not -Contain 'rp-2222000001'
         # The second VM's host and datastore are not in the plan; only its folder links to it.
@@ -331,58 +388,88 @@ Describe 'ConvertTo-SynthSampleList' {
 
 Describe 'Invoke-SynthSeed' {
     BeforeAll {
-        $script:plan = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001'
+        $script:plan = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001' -PhysicalDatacenter 'Test PDC'
+
+        # A resource as GET /api/resources lists it.
+        function New-TestResource {
+            param([string]$Id, [string]$Name, [string]$IdentifierName, [string]$Value)
+            $identifiers = if ($IdentifierName) { @(@{ identifierType = @{ name = $IdentifierName }; value = $Value }) } else { @() }
+            @{ identifier = $Id; resourceKey = @{ name = $Name; resourceIdentifiers = $identifiers } }
+        }
     }
 
     BeforeEach {
         $script:posts = [System.Collections.Generic.List[object]]::new()
-        # The datacenter and one host already exist, as after a trial seed; plus an unrelated object of the same prefix.
+        $script:gets = [System.Collections.Generic.List[object]]::new()
+        # The datacenter and host exist from an earlier run; a real VM shares a planned VM's name but not its ID.
         Mock -ModuleName VcfOpsSynth Invoke-SynthOpsRequest {
+            $script:gets.Add($Query)
             $existing = switch ($Query.resourceKind) {
-                'Datacenter' { @(@{ identifier = 'ops-dc-existing'; resourceKey = @{ name = 'Synth-dc-aaaa000001' } }) }
-                'HostSystem' { @(@{ identifier = 'ops-esx-existing'; resourceKey = @{ name = 'Synth-esx-cccc000001' } }, @{ identifier = 'ops-other'; resourceKey = @{ name = 'Synth-esx-other' } }) }
+                'Datacenter' { @(New-TestResource 'ops-dc-existing' 'dc-aaaa000001' 'VMEntityObjectID' 'datacenter-synth-aaaa000001') }
+                'HostSystem' { @((New-TestResource 'ops-esx-existing' 'old-esx-name' 'VMEntityObjectID' 'host-synth-cccc000001'), (New-TestResource 'ops-other' 'esx-other' 'VMEntityObjectID' 'host-42')) }
+                'VirtualMachine' { @(New-TestResource 'ops-real-vm' 'vm-3333000001' 'VMEntityObjectID' 'vm-1001') }
                 default { @() }
             }
-            [pscustomobject]@{ resourceList = $existing; pageInfo = [pscustomobject]@{ totalCount = $existing.Count } }
+            [pscustomobject]@{ resourceList = $existing; pageInfo = [pscustomobject]@{ totalCount = @($existing).Count } }
         } -ParameterFilter { $Method -eq 'Get' }
         Mock -ModuleName VcfOpsSynth Invoke-SynthOpsRequest {
             $script:posts.Add(@{ Path = $Path; Body = $Body })
-            if ($Path -like 'resources/adapters/*') { [pscustomobject]@{ identifier = "ops-$($Body.resourceKey.name)" } }
+            if ($Path -like 'resources/adapters/*' -or $Path -like 'resources/adapterkinds/*') { [pscustomobject]@{ identifier = "ops-$($Body.resourceKey.resourceKindKey)-$($Body.resourceKey.name)" } }
         } -ParameterFilter { $Method -eq 'Post' }
     }
 
-    It 'skips objects that already exist and creates the rest under the adapter instance' {
+    It 'skips objects that already exist by identifier, not by name, and creates the rest' {
         $result = Invoke-SynthSeed -Plan $script:plan -AdapterInstanceId 'adapter-1'
 
         $result.existing.Datacenter | Should -Be 1
         $result.existing.HostSystem | Should -Be 1
         $result.created.Datacenter | Should -Be 0
         $result.created.HostSystem | Should -Be 0
+        # The real VM with the same name is not mistaken for the planned one.
         $result.created.VirtualMachine | Should -Be 2
+        $result.ids['vm-3333000001'] | Should -Not -Be 'ops-real-vm'
         $result.created.VMFolder | Should -Be 2
         $result.failed.Count | Should -Be 0
-        $creates = @($script:posts | Where-Object { $_.Path -eq 'resources/adapters/adapter-1' })
-        $creates.Count | Should -Be 8
-        $creates.Body.resourceKey.name | Should -Not -Contain 'Synth-dc-aaaa000001'
-        $creates.Body.resourceKey.name | Should -Not -Contain 'Synth-esx-cccc000001'
         $result.ids['dc-aaaa000001'] | Should -Be 'ops-dc-existing'
         $result.ids['esx-cccc000001'] | Should -Be 'ops-esx-existing'
+        $result.renamed | Should -HaveCount 1
+        $result.renamed[0] | Should -BeLike "HostSystem 'old-esx-name' is planned as 'esx-cccc000001'*"
     }
 
-    It 'pushes stats and properties for each created object, text as values' {
+    It 'creates VMWARE kinds under the adapter instance and the toolset''s kinds under their adapter kind, foundations first' {
         $null = Invoke-SynthSeed -Plan $script:plan -AdapterInstanceId 'adapter-1'
 
+        $creates = @($script:posts | Where-Object { $_.Path -like 'resources/adapters/*' -or $_.Path -like 'resources/adapterkinds/*' })
+        $creates.Count | Should -Be 11
+        $native = @($creates | Where-Object { $_.Path -eq 'resources/adapters/adapter-1' })
+        $custom = @($creates | Where-Object { $_.Path -eq 'resources/adapterkinds/VcfOpsSynth' })
+        $native.Count | Should -Be 9
+        @($custom | ForEach-Object { $_.Body.resourceKey.resourceKindKey }) | Should -Be @('StandardSwitch', 'StandardPortgroup')
+        @($custom | ForEach-Object { $_.Body.resourceKey.adapterKindKey }) | Should -Be @('VcfOpsSynth', 'VcfOpsSynth')
+        $kinds = [System.Collections.Generic.List[string]]@($creates | ForEach-Object { $_.Body.resourceKey.resourceKindKey })
+        $kinds[0] | Should -Be 'PhysicalDatacenter'
+        $kinds.IndexOf('Datastore') | Should -BeLessThan $kinds.IndexOf('VmwareDistributedVirtualSwitch')
+        $kinds.IndexOf('VirtualMachine') | Should -Be ($kinds.Count - 2)
+        @($script:gets | Where-Object { $_.resourceKind -eq 'StandardSwitch' })[0].ContainsKey('adapterInstanceId') | Should -BeFalse
+    }
+
+    It 'pushes stats where there are any, properties always, text as values' {
+        $null = Invoke-SynthSeed -Plan $script:plan -AdapterInstanceId 'adapter-1'
+
+        # Eleven created; the Physical Data Center and the two standard objects have no rubric stats.
         @($script:posts | Where-Object { $_.Path -like 'resources/*/stats' }).Count | Should -Be 8
-        @($script:posts | Where-Object { $_.Path -like 'resources/*/properties' }).Count | Should -Be 8
-        $vmStats = @($script:posts | Where-Object { $_.Path -eq 'resources/ops-Synth-vm-3333000001/stats' })[0].Body.'stat-content'
+        @($script:posts | Where-Object { $_.Path -like 'resources/*/properties' }).Count | Should -Be 11
+        $vmStats = @($script:posts | Where-Object { $_.Path -eq 'resources/ops-VirtualMachine-vm-3333000001/stats' })[0].Body.'stat-content'
         $tools = @($vmStats | Where-Object { $_.statKey -eq 'guest|tools_status' })[0]
         $tools.values | Should -Be @('toolsOk')
         $tools.Contains('data') | Should -BeFalse
         @($vmStats | Where-Object { $_.statKey -eq 'cpu|usage_average' })[0].data | Should -Be @(33.3)
+        $vssProps = @($script:posts | Where-Object { $_.Path -eq 'resources/ops-StandardSwitch-vss-ffff000002/properties' })[0].Body.'property-content'
+        @($vssProps | Where-Object { $_.statKey -eq 'summary|tag' })[0].values | Should -Be @('[<vcfops-synth-synthetic>]')
         @($script:posts | Where-Object { $_.Path -like 'resources/ops-esx-existing/*' -and $_.Path -notlike '*/relationships/*' }).Count | Should -Be 0
     }
 
-    It 'links parents to children using only IDs of plan objects' {
+    It 'links parents to children using only plan IDs and the adapter instance' {
         $result = Invoke-SynthSeed -Plan $script:plan -AdapterInstanceId 'adapter-1'
 
         $links = @($script:posts | Where-Object { $_.Path -like 'resources/*/relationships/children' })
@@ -392,8 +479,10 @@ Describe 'Invoke-SynthSeed' {
             foreach ($uuid in $post.Body.uuids) { $uuid | Should -BeIn $known }
         }
         $known | Should -Not -Contain 'ops-other'
-        $fromDc = @($links | Where-Object { $_.Path -eq 'resources/ops-dc-existing/relationships/children' })[0]
-        $fromDc.Body.uuids | Should -Contain 'ops-Synth-cluster-bbbb000001'
+        $known | Should -Not -Contain 'ops-real-vm'
+        @($links | Where-Object { $_.Path -eq 'resources/adapter-1/relationships/children' })[0].Body.uuids | Should -Be @('ops-dc-existing')
+        @($links | Where-Object { $_.Path -eq 'resources/ops-PhysicalDatacenter-Test PDC/relationships/children' })[0].Body.uuids | Should -Be @('ops-dc-existing')
+        @($links | Where-Object { $_.Path -eq 'resources/ops-dc-existing/relationships/children' })[0].Body.uuids | Should -Contain 'ops-ClusterComputeResource-cluster-bbbb000001'
         $result.links | Should -Be (($script:plan.links | ForEach-Object { @($_.children).Count } | Measure-Object -Sum).Sum)
     }
 
@@ -406,16 +495,16 @@ Describe 'Invoke-SynthSeed' {
     It 'records a failed object and carries on' {
         Mock -ModuleName VcfOpsSynth Invoke-SynthOpsRequest {
             $script:posts.Add(@{ Path = $Path; Body = $Body })
-            if ($Path -like 'resources/adapters/*') {
-                if ($Body.resourceKey.name -eq 'Synth-vm-3333000001') { throw 'HTTP 500' }
-                [pscustomobject]@{ identifier = "ops-$($Body.resourceKey.name)" }
+            if ($Path -like 'resources/adapters/*' -or $Path -like 'resources/adapterkinds/*') {
+                if ($Body.resourceKey.name -eq 'vm-3333000001') { throw 'HTTP 500' }
+                [pscustomobject]@{ identifier = "ops-$($Body.resourceKey.resourceKindKey)-$($Body.resourceKey.name)" }
             }
         } -ParameterFilter { $Method -eq 'Post' }
 
         $result = Invoke-SynthSeed -Plan $script:plan -AdapterInstanceId 'adapter-1'
 
         $result.failed | Should -HaveCount 1
-        $result.failed[0] | Should -BeLike 'VirtualMachine Synth-vm-3333000001*HTTP 500*'
+        $result.failed[0] | Should -BeLike 'VirtualMachine vm-3333000001*HTTP 500*'
         $result.created.VirtualMachine | Should -Be 1
         $result.ids.Keys | Should -Not -Contain 'vm-3333000001'
     }

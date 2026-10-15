@@ -27,7 +27,7 @@ function Get-SynthRubric {
         $kind = if ($rubric.resourceKind) { $rubric.resourceKind } else { $file.BaseName -replace '^VMWARE-', '' }
         $rubrics[$kind] = $rubric
     }
-    $missing = @(Get-SynthSeedKind | Where-Object { -not $rubrics.ContainsKey($_) })
+    $missing = @(Get-SynthSeedKind -WithRubric | Where-Object { -not $rubrics.ContainsKey($_) })
     if ($missing.Count) { throw "Rubrics folder '$Path' has no rubric for $($missing -join ', ')." }
     $rubrics
 }
@@ -38,19 +38,27 @@ function New-SynthSeedPlan {
         Works out every object, metric, property and link the seed creates, without calling Operations.
 
     .DESCRIPTION
-        Turns the inventory model into VMWARE objects under a vCenter adapter
-        instance: datacenters, clusters, hosts, datastores, distributed switches
-        and port groups, VM folders and VMs. Each is named with the prefix and its
-        inventory name, and gets every stat key and property of its kind's
-        rubric. Per-instance keys are expanded from the object's own devices:
-        virtual disks, guest file systems and network adapters for a VM; physical
-        NICs, VMkernel adapters and HBAs for a host; member hosts for a switch.
-        Identity, parent and sizing properties come from the inventory, and IP
-        and MAC addresses from the reference object are never copied.
+        Turns the inventory model into objects under a vCenter adapter instance,
+        foundations first: an optional Physical Data Center, then datacenters,
+        clusters, datastores, hosts, distributed and standard switches, their port
+        groups, VM folders and VMs. Each keeps its inventory name (with the
+        optional prefix) and carries the synthetic tag. VMWARE kinds get every
+        stat key and property of their kind's rubric. Per-instance keys are
+        expanded from the object's own devices: virtual disks, guest file systems
+        and network adapters for a VM; physical NICs, VMkernel adapters and HBAs
+        for a host; member hosts for a switch. Identity, parent and sizing
+        properties come from the inventory, and IP and MAC addresses from the
+        reference object are never copied. Standard switches and port groups have
+        no VMWARE kind, so they go under the toolset's own adapter kind with the
+        inventory's properties only.
 
-        Links join each object to its synthetic parents only. Standard port groups
-        and resource pools have no VMWARE kind with a rubric, so they are counted
-        in skipped instead.
+        Every relationship is worked out here, before anything is created. Links
+        join each object to its parents in the plan, and the datacenters to the
+        vCenter adapter instance ('@vcenter') and the Physical Data Center.
+        Operations does not show the root Resources pool of a cluster or
+        standalone host, so these are counted in skipped. User-created resource
+        pools are a VMWARE kind but are not seeded yet; skipped.userResourcePools
+        counts them.
 
     .PARAMETER Inventory
         The model from Import-SynthRvtools or Get-SynthInventory.
@@ -62,19 +70,35 @@ function New-SynthSeedPlan {
         The vCenter instance UUID (VMEntityVCID) of the adapter instance the objects go under.
 
     .PARAMETER Prefix
-        Name prefix that marks synthetic objects. Defaults to Synth-.
+        Optional name prefix. Empty by default, so objects keep their inventory
+        names; the tag is what marks them as synthetic.
+
+    .PARAMETER Tag
+        The vSphere tag every object carries, as Category and Name. It is written
+        to summary|tag and summary|tagJson.
+
+    .PARAMETER CustomAdapterKind
+        The toolset's own adapter kind, for standard switches and port groups,
+        which have no VMWARE kind.
+
+    .PARAMETER PhysicalDatacenter
+        Name of a Physical Data Center to put above the datacenters. Empty means none.
 
     .EXAMPLE
         $plan = New-SynthSeedPlan -Inventory $inventory -Rubric $rubrics -VcId $vcId
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds a plan in memory; Invoke-SynthSeed makes the changes.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'CustomAdapterKind', Justification = 'Used inside the add script block, which the rule does not follow.')]
     [CmdletBinding()]
     [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)][System.Collections.IDictionary]$Inventory,
         [Parameter(Mandatory)][hashtable]$Rubric,
         [Parameter(Mandatory)][string]$VcId,
-        [string]$Prefix = 'Synth-'
+        [AllowEmptyString()][string]$Prefix = '',
+        [System.Collections.IDictionary]$Tag = @{ Category = 'vcfops-synth'; Name = 'synthetic' },
+        [string]$CustomAdapterKind = 'VcfOpsSynth',
+        [AllowEmptyString()][string]$PhysicalDatacenter = ''
     )
 
     $objects = [System.Collections.Generic.List[object]]::new()
@@ -82,7 +106,9 @@ function New-SynthSeedPlan {
     $children = [ordered]@{}
     $link = {
         param($ParentId, $ChildId)
-        if (-not $ParentId -or -not $ChildId -or -not $byId.ContainsKey($ParentId) -or -not $byId.ContainsKey($ChildId)) { return }
+        # '@vcenter' is the adapter instance itself, which Invoke-SynthSeed resolves.
+        if (-not $ParentId -or -not $ChildId -or -not $byId.ContainsKey($ChildId)) { return }
+        if ($ParentId -ne '@vcenter' -and -not $byId.ContainsKey($ParentId)) { return }
         if (-not $children.Contains($ParentId)) { $children[$ParentId] = [System.Collections.Generic.List[string]]::new() }
         if (-not $children[$ParentId].Contains($ChildId)) { $children[$ParentId].Add($ChildId) }
     }
@@ -96,29 +122,39 @@ function New-SynthSeedPlan {
     $vcenter = Get-SynthRubricValue -Rubric $Rubric.Datacenter -Name 'summary|parentVcenter'
     $prepared = @{}
     $renameKeys = 'config|name', 'summary|parentDatacenter', 'summary|parentCluster', 'summary|parentHost', 'summary|parentFolder', 'summary|folder', 'summary|datastore'
+    $tagSet = [ordered]@{
+        'summary|tag'     = "[<$($Tag.Category)-$($Tag.Name)>]"
+        'summary|tagJson' = ConvertTo-Json -Compress -InputObject @([ordered]@{ category = [string]$Tag.Category; name = [string]$Tag.Name })
+    }
+    $customKinds = Get-SynthSeedKind -Custom
 
-    # Objects first, so links and parent names can look each other up.
+    # Objects first, parents before children, so links and parent names can look each other up.
     $add = {
         param($Kind, $Item)
+        $adapterKind = if ($Kind -in $customKinds) { $CustomAdapterKind } else { 'VMWARE' }
         $record = [ordered]@{
-            key        = $Item.id
-            kind       = $Kind
-            name       = "$Prefix$($Item.name)"
-            moid       = "$(Get-SynthMoidPrefix -Kind $Kind)-synth-$(($Item.id -split '-')[-1])"
-            item       = $Item
+            key         = $Item.id
+            kind        = $Kind
+            adapterKind = $adapterKind
+            name        = "$Prefix$($Item.name)"
+            moid        = if ($adapterKind -eq 'VMWARE' -and $Kind -ne 'PhysicalDatacenter') { "$(Get-SynthMoidPrefix -Kind $Kind)-synth-$(($Item.id -split '-')[-1])" } else { $null }
+            item        = $Item
             identifiers = $null
-            stats      = $null
-            properties = $null
+            stats       = $null
+            properties  = $null
         }
         $objects.Add($record)
         $byId[$Item.id] = $record
     }
+    if ($PhysicalDatacenter) { & $add 'PhysicalDatacenter' @{ id = 'pdc-synth'; name = $PhysicalDatacenter } }
     foreach ($dc in @($Inventory.datacenters)) { & $add 'Datacenter' $dc }
     foreach ($cluster in @($Inventory.clusters)) { & $add 'ClusterComputeResource' $cluster }
-    foreach ($h in @($Inventory.hosts)) { & $add 'HostSystem' $h }
     foreach ($ds in @($Inventory.datastores)) { & $add 'Datastore' $ds }
+    foreach ($h in @($Inventory.hosts)) { & $add 'HostSystem' $h }
     foreach ($sw in @($Inventory.switches | Where-Object { $_.kind -eq 'distributed' })) { & $add 'VmwareDistributedVirtualSwitch' $sw }
+    foreach ($sw in @($Inventory.switches | Where-Object { $_.kind -ne 'distributed' })) { & $add 'StandardSwitch' $sw }
     foreach ($net in @($Inventory.networks | Where-Object { $_.kind -eq 'distributed' })) { & $add 'DistributedVirtualPortgroup' $net }
+    foreach ($net in @($Inventory.networks | Where-Object { $_.kind -ne 'distributed' })) { & $add 'StandardPortgroup' $net }
     foreach ($folder in @($Inventory.folders)) { & $add 'VMFolder' $folder }
     foreach ($vm in @($Inventory.vms)) { & $add 'VirtualMachine' $vm }
 
@@ -128,7 +164,20 @@ function New-SynthSeedPlan {
         $families = @()
         $set = [ordered]@{ 'config|name' = $record.name }
         switch ($kind) {
+            'PhysicalDatacenter' { }
             'Datacenter' { }
+            'StandardSwitch' {
+                $set['summary|parentDatacenter'] = & $nameOf $item.datacenter
+                $set['summary|parentHost'] = (@($item.hosts | ForEach-Object { & $nameOf $_ }) -join ', ')
+                if ($item.mtu) { $set['config|mtu'] = $item.mtu }
+                if ($item.ports) { $set['config|numPorts'] = $item.ports }
+            }
+            'StandardPortgroup' {
+                $set['summary|parentDatacenter'] = & $nameOf $item.datacenter
+                $set['summary|parentHost'] = (@($item.hosts | ForEach-Object { & $nameOf $_ }) -join ', ')
+                if ($item.switch) { $set['summary|parentSwitch'] = & $nameOf $item.switch }
+                $set['config|policies|security|vlan_id'] = if ($item.vlan) { [string]$item.vlan } else { 'none' }
+            }
             'ClusterComputeResource' {
                 $set['summary|parentDatacenter'] = & $nameOf $item.datacenter
                 if ($null -ne $item.haEnabled) { $set['configuration|dasConfig|enabled'] = if ($item.haEnabled) { 'Enabled' } else { 'Disabled' } }
@@ -197,7 +246,10 @@ function New-SynthSeedPlan {
                 $families = Get-SynthVmFamily -Vm $item -Record $record -NameOf $nameOf
             }
         }
-        $kindRubric = $Rubric[$kind]
+        # Kinds with no rubric (a Physical Data Center, standard switches and port groups) carry only what the inventory says.
+        $hasRubric = $Rubric.ContainsKey($kind)
+        $kindRubric = if ($hasRubric) { $Rubric[$kind] } else { @{ latest = @(); properties = @() } }
+        foreach ($key in $tagSet.Keys) { $set[$key] = $tagSet[$key] }
         if (-not $prepared.ContainsKey($kind)) {
             # Everything that depends only on the kind's rubric, worked out once instead of once per object.
             $real = @{}
@@ -227,20 +279,35 @@ function New-SynthSeedPlan {
 
         $record.identifiers = @(Get-SynthSeedIdentifier -Kind $kind -Record $record -VcId $VcId)
         $record.stats = @(Join-SynthRubricEntry -Split $prep.Stats -Family $families)
+        $seen = [System.Collections.Generic.HashSet[string]]::new()
         $record.properties = @(foreach ($p in (Join-SynthRubricEntry -Split $prep.Properties -Family $families)) {
+                $null = $seen.Add($p.key)
                 if ($set.Contains($p.key)) { @{ key = $p.key; value = $set[$p.key] }; continue }
                 $value = $p.value
                 if ($value -is [string] -and $renameOrder.Count) {
                     foreach ($old in $renameOrder) { if ($value.Contains($old)) { $value = $value.Replace($old, $rename[$old]) } }
                 }
                 @{ key = $p.key; value = $value }
+            }
+            # A kind with a rubric keeps exactly the rubric's keys, plus the tag; one without gets everything the inventory gave.
+            foreach ($key in $set.Keys) {
+                if (-not $seen.Contains($key) -and (-not $hasRubric -or $tagSet.Contains($key))) { @{ key = $key; value = $set[$key] } }
             })
     }
 
-    # Links, parent to children, only between objects in this plan.
+    # Links, parent to children, between objects in this plan; datacenters also go under the vCenter adapter instance.
     foreach ($record in $objects) {
         $item = $record.item
         switch ($record.kind) {
+            'Datacenter' {
+                & $link '@vcenter' $item.id
+                if ($PhysicalDatacenter) { & $link 'pdc-synth' $item.id }
+            }
+            'StandardSwitch' { foreach ($hostId in @($item.hosts)) { & $link $hostId $item.id } }
+            'StandardPortgroup' {
+                if ($item.switch -and $byId.ContainsKey($item.switch)) { & $link $item.switch $item.id }
+                else { foreach ($hostId in @($item.hosts)) { & $link $hostId $item.id } }
+            }
             'ClusterComputeResource' { & $link $item.datacenter $item.id }
             'HostSystem' { if ($item.cluster -and $byId.ContainsKey($item.cluster)) { & $link $item.cluster $item.id } else { & $link $item.datacenter $item.id } }
             'Datastore' {
@@ -263,13 +330,12 @@ function New-SynthSeedPlan {
         vcId    = $VcId
         prefix  = $Prefix
         objects = @($objects | ForEach-Object {
-                [ordered]@{ key = $_.key; kind = $_.kind; name = $_.name; moid = $_.moid; identifiers = $_.identifiers; stats = $_.stats; properties = $_.properties }
+                [ordered]@{ key = $_.key; kind = $_.kind; adapterKind = $_.adapterKind; name = $_.name; moid = $_.moid; identifiers = $_.identifiers; stats = $_.stats; properties = $_.properties }
             })
         links   = @(foreach ($parentId in $children.Keys) { [ordered]@{ parent = $parentId; children = @($children[$parentId]) } })
         skipped = [ordered]@{
-            standardNetworks = @($Inventory.networks | Where-Object { $_.kind -ne 'distributed' }).Count
-            standardSwitches = @($Inventory.switches | Where-Object { $_.kind -ne 'distributed' }).Count
-            resourcePools    = @($Inventory.resourcePools).Count
+            rootResourcePools = @($Inventory.resourcePools | Where-Object { -not $_.parent -and $_.name -eq 'Resources' }).Count
+            userResourcePools = @($Inventory.resourcePools | Where-Object { $_.parent -or $_.name -ne 'Resources' }).Count
         }
     }
 }
@@ -280,11 +346,14 @@ function Invoke-SynthSeed {
         Creates the objects of a seed plan in VCF Operations and links them.
 
     .DESCRIPTION
-        For each object in the plan, in parent-first order: if an object of that
-        kind and name already exists, it is skipped and only used for links;
-        otherwise it is created under the adapter instance, then its stats and
+        For each object in the plan, foundations first: if an object of that
+        kind with the same unique identifier already exists, it is skipped and
+        only used for links (and listed in renamed when its name differs);
+        otherwise it is created, VMWARE kinds under the adapter instance and the
+        toolset's own kinds under their adapter kind, then its stats and
         properties are pushed. Numbers go as data and text as values. Last, each
-        parent is linked to its children, all of them objects from the plan.
+        parent is linked to its children: objects from the plan, plus the
+        adapter instance itself above the datacenters.
 
         Run Connect-SynthOps first.
 
@@ -304,8 +373,12 @@ function Invoke-SynthSeed {
         [Parameter(Mandatory)][string]$AdapterInstanceId
     )
 
-    $result = [ordered]@{ created = [ordered]@{}; existing = [ordered]@{}; failed = [System.Collections.Generic.List[string]]::new(); links = 0 }
-    $ids = @{}
+    $result = [ordered]@{
+        created = [ordered]@{}; existing = [ordered]@{}; renamed = [System.Collections.Generic.List[string]]::new()
+        failed = [System.Collections.Generic.List[string]]::new(); links = 0
+    }
+    # '@vcenter' in the plan's links is the adapter instance's own resource, the vCenter the datacenters sit under.
+    $ids = @{ '@vcenter' = $AdapterInstanceId }
     $objects = @($Plan.objects)
     $total = $objects.Count
     $done = 0
@@ -315,23 +388,33 @@ function Invoke-SynthSeed {
         $result.created[$kind] = 0
         $result.existing[$kind] = 0
         if (-not $ofKind.Count) { continue }
-        $prefix = if ($Plan.Contains('prefix') -and $Plan.prefix) { $Plan.prefix } else { 'Synth-' }
-        $existing = Get-SynthExistingResource -Kind $kind -AdapterInstanceId $AdapterInstanceId -Name @($ofKind | ForEach-Object { $_.name }) -Prefix $prefix
+        $adapterKind = if ($ofKind[0].Contains('adapterKind') -and $ofKind[0].adapterKind) { $ofKind[0].adapterKind } else { 'VMWARE' }
+        $native = $adapterKind -eq 'VMWARE'
+        $unique = @($ofKind[0].identifiers | Where-Object { $_.unique })
+        $lookup = @{ Kind = $kind; AdapterKind = $adapterKind }
+        if ($native) { $lookup.AdapterInstanceId = $AdapterInstanceId }
+        if ($unique.Count) { $lookup.IdentifierName = $unique[0].name }
+        $existing = Get-SynthExistingResource @lookup
         foreach ($object in $ofKind) {
             $done++
             if ($done % 50 -eq 0) { Write-Progress -Activity 'Seeding VCF Operations' -Status "$done of $total" -PercentComplete ($done / $total * 100) }
-            if ($existing.ContainsKey($object.name)) {
-                $ids[$object.key] = $existing[$object.name]
+            $match = $existing[(Get-SynthSeedUniqueKey -Object $object)]
+            if ($match) {
+                $ids[$object.key] = $match.id
                 $result.existing[$kind]++
+                if ($match.name -ne $object.name) { $result.renamed.Add("$kind '$($match.name)' is planned as '$($object.name)'; delete it to reseed under the new name") }
                 continue
             }
             if (-not $PSCmdlet.ShouldProcess("$kind $($object.name)", 'Create')) { continue }
             try {
-                $created = Invoke-SynthOpsRequest -Method Post -Path "resources/adapters/$AdapterInstanceId" -Body (ConvertTo-SynthResourceBody -Object $object)
+                $path = if ($native) { "resources/adapters/$AdapterInstanceId" } else { "resources/adapterkinds/$adapterKind" }
+                $created = Invoke-SynthOpsRequest -Method Post -Path $path -Body (ConvertTo-SynthResourceBody -Object $object)
                 $id = $created.identifier
                 $ids[$object.key] = $id
                 $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-                $null = Invoke-SynthOpsRequest -Method Post -Path "resources/$id/stats" -Body @{ 'stat-content' = @(ConvertTo-SynthSampleList -Entry $object.stats -Timestamp $now) }
+                if (@($object.stats).Count) {
+                    $null = Invoke-SynthOpsRequest -Method Post -Path "resources/$id/stats" -Body @{ 'stat-content' = @(ConvertTo-SynthSampleList -Entry $object.stats -Timestamp $now) }
+                }
                 $null = Invoke-SynthOpsRequest -Method Post -Path "resources/$id/properties" -Body @{ 'property-content' = @(ConvertTo-SynthSampleList -Entry $object.properties -Timestamp $now) }
                 $result.created[$kind]++
             }
@@ -392,9 +475,21 @@ function Resolve-SynthSeedTarget {
 }
 
 function Get-SynthSeedKind {
-    <# The VMWARE resource kinds the seed creates, parents first. #>
+    <#
+    .SYNOPSIS
+        The resource kinds the seed creates, foundations first.
+
+    .DESCRIPTION
+        With -WithRubric, only the VMWARE kinds filled from a rubric. With
+        -Custom, only the kinds that go under the toolset's own adapter kind
+        (standard switches and port groups, which VMWARE does not model).
+    #>
     [CmdletBinding()]
     [OutputType([string])]
-    param()
-    'Datacenter', 'ClusterComputeResource', 'HostSystem', 'Datastore', 'VmwareDistributedVirtualSwitch', 'DistributedVirtualPortgroup', 'VMFolder', 'VirtualMachine'
+    param([switch]$WithRubric, [switch]$Custom)
+    $customKinds = 'StandardSwitch', 'StandardPortgroup'
+    if ($Custom) { return $customKinds }
+    $all = 'PhysicalDatacenter', 'Datacenter', 'ClusterComputeResource', 'Datastore', 'HostSystem', 'VmwareDistributedVirtualSwitch', 'StandardSwitch', 'DistributedVirtualPortgroup', 'StandardPortgroup', 'VMFolder', 'VirtualMachine'
+    if ($WithRubric) { return @($all | Where-Object { $_ -notin $customKinds -and $_ -ne 'PhysicalDatacenter' }) }
+    $all
 }

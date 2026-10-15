@@ -35,6 +35,9 @@ function Get-SynthSeedIdentifier {
         [Parameter(Mandatory)][string]$VcId
     )
 
+    # The toolset's own kinds need one identifier; a Physical Data Center has none and is unique by name.
+    if ($Kind -in (Get-SynthSeedKind -Custom)) { return @{ name = 'SynthId'; value = $Record.key; unique = $true } }
+    if ($Kind -eq 'PhysicalDatacenter') { return }
     @{ name = 'VMEntityObjectID'; value = $Record.moid; unique = $true }
     @{ name = 'VMEntityVCID'; value = $VcId; unique = $true }
     if ($Kind -ne 'VMFolder') { @{ name = 'VMEntityName'; value = $Record.name; unique = $false } }
@@ -363,7 +366,7 @@ function ConvertTo-SynthResourceBody {
         description = 'vcfops-synth seed'
         resourceKey = @{
             name                = $Object.name
-            adapterKindKey      = 'VMWARE'
+            adapterKindKey      = if ($Object.Contains('adapterKind') -and $Object.adapterKind) { $Object.adapterKind } else { 'VMWARE' }
             resourceKindKey     = $Object.kind
             resourceIdentifiers = @(foreach ($id in $Object.identifiers) {
                     @{ identifierType = @{ name = $id.name; dataType = 'STRING'; isPartOfUniqueness = [bool]$id.unique }; value = [string]$id.value }
@@ -372,30 +375,48 @@ function ConvertTo-SynthResourceBody {
     }
 }
 
+function Get-SynthSeedUniqueKey {
+    <# What makes a planned object the same as one in Operations: its unique identifier's value, or its name when it has none. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Object)
+    $unique = @($Object.identifiers | Where-Object { $_.unique })
+    if ($unique.Count) { "$($unique[0].name)=$($unique[0].value)" } else { "name=$($Object.name)" }
+}
+
 function Get-SynthExistingResource {
     <#
     .SYNOPSIS
-        Returns name to ID for the objects of a kind under an adapter instance whose names are in Name.
+        Returns the objects of a kind already in Operations, keyed as Get-SynthSeedUniqueKey keys a planned object.
+
+    .DESCRIPTION
+        Matching is on the unique identifier (VMEntityObjectID or SynthId), not
+        the name, so a real object that shares a name with a synthetic one is
+        never mistaken for it. Each value holds the resource ID and its name.
     #>
     [CmdletBinding()]
     [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)][string]$Kind,
-        [Parameter(Mandatory)][string]$AdapterInstanceId,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Name,
-        [string]$Prefix = 'Synth-'
+        [string]$AdapterKind = 'VMWARE',
+        [string]$AdapterInstanceId,
+        [string]$IdentifierName
     )
 
-    $wanted = [System.Collections.Generic.HashSet[string]]::new([string[]]$Name, [System.StringComparer]::Ordinal)
     $found = @{}
     $page = 0
     while ($true) {
-        $response = Invoke-SynthOpsRequest -Method Get -Path 'resources' -Query @{
-            adapterKind = 'VMWARE'; resourceKind = $Kind; adapterInstanceId = $AdapterInstanceId; name = $Prefix; page = $page; pageSize = 1000
-        }
+        $query = @{ adapterKind = $AdapterKind; resourceKind = $Kind; page = $page; pageSize = 1000 }
+        if ($AdapterInstanceId) { $query.adapterInstanceId = $AdapterInstanceId }
+        $response = Invoke-SynthOpsRequest -Method Get -Path 'resources' -Query $query
         $list = @($response.resourceList | Where-Object { $_ })
         foreach ($resource in $list) {
-            if ($wanted.Contains($resource.resourceKey.name)) { $found[$resource.resourceKey.name] = $resource.identifier }
+            $key = if ($IdentifierName) {
+                $id = @($resource.resourceKey.resourceIdentifiers | Where-Object { $_.identifierType.name -eq $IdentifierName })
+                if ($id.Count -and $id[0].value) { "$IdentifierName=$($id[0].value)" }
+            }
+            else { "name=$($resource.resourceKey.name)" }
+            if ($key) { $found[$key] = @{ id = $resource.identifier; name = $resource.resourceKey.name } }
         }
         $total = if ($response.PSObject.Properties['pageInfo'] -and $response.pageInfo) { [int]$response.pageInfo.totalCount } else { $list.Count }
         $page++
