@@ -96,6 +96,8 @@ $takesArguments = @('import')
 
 function Read-ImportArgument {
     param([string[]]$Argument)
+    # Plain 'import' passes no arguments at all, and StrictMode refuses .Count on $null.
+    if (-not $Argument) { $Argument = @() }
     $parsed = @{ Source = $null; Output = $null; Tiering = $null; Anonymise = $null }
     for ($i = 0; $i -lt $Argument.Count; $i++) {
         $arg = $Argument[$i]
