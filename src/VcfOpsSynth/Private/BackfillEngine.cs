@@ -257,14 +257,19 @@ namespace VcfOpsSynth
         // The stat-content bodies for one object, each holding at most maxSamples samples.
         public static List<string> Bodies(ObjectSpec o, long startMs, int stepMs, double[] how, int maxSamples, out long samples)
         {
+            samples = (long)o.Series.Length * how.Length;
+            return BodyStream(o, startMs, stepMs, how, maxSamples).ToList();
+        }
+
+        // The same bodies made one at a time, so only the body being posted is held in memory.
+        public static IEnumerable<string> BodyStream(ObjectSpec o, long startMs, int stepMs, double[] how, int maxSamples)
+        {
             int n = how.Length;
             var tsb = new StringBuilder(n * 15);
             for (int i = 0; i < n; i++) { if (i > 0) tsb.Append(','); tsb.Append((startMs + (long)i * stepMs).ToString(CultureInfo.InvariantCulture)); }
             string timestamps = tsb.ToString();
             var shape = Shape(o, how, stepMs);
-            var bodies = new List<string>();
             int perBody = Math.Max(1, maxSamples / Math.Max(1, n));
-            samples = 0;
             for (int start = 0; start < o.Series.Length; start += perBody)
             {
                 var sb = new StringBuilder();
@@ -278,12 +283,10 @@ namespace VcfOpsSynth
                     sb.Append("{\"statKey\":\"").Append(Escape(s.Key)).Append("\",\"timestamps\":[").Append(timestamps).Append("],\"data\":[");
                     for (int i = 0; i < n; i++) { if (i > 0) sb.Append(','); AppendNumber(sb, v[i]); }
                     sb.Append("]}");
-                    samples += n;
                 }
                 sb.Append("]}");
-                bodies.Add(sb.ToString());
+                yield return sb.ToString();
             }
-            return bodies;
         }
 
         // Generates and posts each object's history, several objects at a time. 429 and 5xx are retried;
@@ -309,8 +312,9 @@ namespace VcfOpsSynth
                         var r = new PushResult { Key = o.Key };
                         try
                         {
-                            long samples;
-                            var bodies = Bodies(o, startMs, stepMs, how, maxSamples, out samples);
+                            long samples = (long)o.Series.Length * how.Length;
+                            // One body at a time: a large VM is millions of samples, too many to hold for several objects at once.
+                            var bodies = BodyStream(o, startMs, stepMs, how, maxSamples);
                             string uri = baseUri.TrimEnd('/') + "/api/resources/" + o.ResourceId + "/stats?disableAnalyticsProcessing=true";
                             foreach (var body in bodies)
                             {
