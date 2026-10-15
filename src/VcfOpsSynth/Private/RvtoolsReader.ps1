@@ -66,8 +66,17 @@ function Read-SynthRvtoolsSheet {
         [Parameter(Mandatory)][string]$Worksheet
     )
 
-    $records = @(Import-Excel -Path $Path -WorksheetName $Worksheet -ErrorAction Stop)
-    $headers = if ($records.Count -gt 0) { @($records[0].PSObject.Properties.Name) } else { @() }
+    # A tab with a header row but no data rows (vSnapshot on a host with no snapshots) is normal.
+    $records = @(Import-Excel -Path $Path -WorksheetName $Worksheet -ErrorAction Stop -WarningAction SilentlyContinue)
+    if ($records.Count -gt 0) {
+        $headers = @($records[0].PSObject.Properties.Name)
+    }
+    else {
+        # Read the header row as data so its column names are still known.
+        $headerRow = @(Import-Excel -Path $Path -WorksheetName $Worksheet -NoHeader -StartRow 1 -EndRow 1 -ErrorAction Stop -WarningAction SilentlyContinue)
+        $headers = @($headerRow | Select-Object -First 1 | ForEach-Object { $_.PSObject.Properties.Value } |
+            Where-Object { $_ } | ForEach-Object { ([string]$_).Trim() })
+    }
     @{ Headers = $headers; Rows = @($records | ForEach-Object { ConvertTo-SynthRowTable -Record $_ }) }
 }
 
