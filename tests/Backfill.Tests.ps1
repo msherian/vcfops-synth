@@ -36,7 +36,7 @@ BeforeAll {
 
 Describe 'Backfill engine' {
     It 'matches a LiveOptics average and peak exactly, never going below zero, for every profile' {
-        foreach ($case in @(@('business-hours', 11.32, 89), @('batch', 30, 95), @('steady', 50, 60), @('idle', 2, 10))) {
+        foreach ($case in @(@('business-hours', 11.32, 89), @('batch', 30, 95), @('steady', 50, 60), @('idle', 2, 10), @('bursty', 8, 70), @('saturated', 85, 99))) {
             $s = New-TestSeries -Key 'cpu|usage_average' -Mode Calibrated -A $case[1] -B $case[2] -Cap 100
             $m = Get-Curve (New-TestObjectSpec -Key "vm-$($case[0])" -WorkloadProfile $case[0]) $s | Measure-Object -Average -Maximum -Minimum
             [math]::Round($m.Average, 3) | Should -Be $case[1] -Because $case[0]

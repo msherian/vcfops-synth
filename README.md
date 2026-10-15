@@ -6,7 +6,7 @@ Everything ships as one Docker image, published to `ghcr.io/msherian/vcfops-synt
 
 ## Status
 
-Phase 2 of 9: the RVTools importer, anonymiser, tiering and baselines, on top of the Phase 1 image, CLI, Suite API sign-in and CI. The commands below marked "to come" stop with exit code 3 and name the phase that builds them.
+Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history, on top of the Phase 2 importer and the Phase 1 image, CLI, Suite API sign-in and CI. The commands below marked "to come" stop with exit code 3 and name the phase that builds them.
 
 | Command | What it does | Phase |
 |---|---|---|
@@ -15,8 +15,9 @@ Phase 2 of 9: the RVTools importer, anonymiser, tiering and baselines, on top of
 | `connect-test` | Signs in to VCF Operations and prints its version | 1 |
 | `plan` | Dry run: what each stage would do | 1 |
 | `import` | RVTools export to inventory model | 2 |
-| `seed`, `reset` | Create and remove objects in VCF Operations | to come (3) |
-| `backfill` | Push generated history | to come (4) |
+| `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
+| `reset` | Remove the objects seed created | to come (3) |
+| `backfill` | Push generated history for every numeric metric | 4 |
 | `content` | Groups, policies, alerts, dashboards | to come (5 to 7) |
 | `feed`, `scenario` | Live metrics and scenario overlays | to come (6) |
 | `live-load` | Optional UPSA and load VMs | to come (9) |
@@ -83,6 +84,20 @@ The inventory model (schema version 3) holds the whole estate the toolset recrea
 ```
 
 VMs no rule profiles are profiled from their usage: idle under 5% CPU and 10% active memory, saturated from 80% CPU or 85% active memory, business-hours otherwise, and off when powered off. The thresholds are under `profiles` in the same file. See `config/tiering.example.json`.
+
+## Seeding
+
+`seed --adapter <vCenter adapter instance>` builds the inventory as VMWARE objects under that instance, foundations first: an optional Physical Data Center (`seed.physicalDatacenter`), datacenters (linked under the vCenter), clusters, datastores, hosts, distributed switches and port groups, VM folders and VMs. Standard switches and port groups, which VMWARE does not model, go under the `adapterKind.key` push kind. Every relationship is worked out before anything is created.
+
+Rubrics captured from real lab objects (`seed.rubrics`, default `<paths.data>/rubrics`) only say which metrics and properties each kind has. Every value comes from the inventory (RVTools, LiveOptics), is derived from it (for example host use over capacity, cluster roll-ups), or is a neutral placeholder (`-`, `0`, `false`). Objects keep their inventory names (`seed.prefix` is optional) and carry two vSphere tags in `summary|tag`: `seed.tag` (default `vcfops-synth-synthetic`) and `Project-<project>`, where the project is `seed.project` or the `YYYY.#### ... OPP-n` folder the export was imported from.
+
+Objects that already exist are found by their identifiers, not their names, and skipped; `--refresh` pushes the planned properties and current stats to them again. `--dry-run` prints the plan.
+
+## Backfill
+
+`backfill` pushes `backfillDays` of history at `intervalMinutes` for every numeric metric of the seeded objects, with analytics processing off. Metrics LiveOptics measured (VM and host CPU, memory, IOPS, throughput, latency) match its average and peak exactly. The rest follow the object's workload curve around their current value, grow to it (space in use), stay flat (capacity, counts) or stay at zero (no source). Each VM's curve comes from its workload profile in `timeZone`, with seeded noise and incident windows; hosts, clusters, datastores, port groups and folders follow the sum of their VMs' curves, so peaks line up.
+
+Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `--restart` starts afresh. `--dry-run` counts objects, series and samples; `--kinds` and `--max-vms` limit a pilot run; `--concurrency` sets how many objects post at once. In the lab, 30 days for 1,709 objects is 2.4 billion samples, about 620,000 a second at concurrency 4, and about 6 bytes a sample in the Operations database.
 
 ## Development
 

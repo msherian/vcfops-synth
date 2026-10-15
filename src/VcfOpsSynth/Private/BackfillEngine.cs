@@ -99,6 +99,8 @@ namespace VcfOpsSynth
                 case "off": return 0;
                 case "idle": return 0.05;
                 case "batch": return (h >= 1 && h < 5) ? 1.0 : 0.12;
+                case "saturated": return 0.9 + 0.05 * Math.Sin(2 * Math.PI * (h - 6) / 24);
+                case "bursty": return 0.15;
                 case "business-hours":
                     {
                         double day;
@@ -123,6 +125,19 @@ namespace VcfOpsSynth
                 double level = ProfileLevel(c.Profile, how[i]);
                 double noise = Math.Exp(0.12 * rng.Gauss() - 0.0072);
                 curve[i] = level * noise;
+            }
+            if ((c.Profile ?? "").ToLowerInvariant() == "bursty")
+            {
+                // Short busy spells, about ten a week, of 15 to 45 minutes.
+                int perHour = Math.Max(1, 3600000 / stepMs);
+                double weeks = (double)n * stepMs / (7 * 86400000.0);
+                int bursts = (int)Math.Round(weeks * (8 + rng.Next() * 4));
+                for (int k = 0; k < bursts; k++)
+                {
+                    int start = (int)(rng.Next() * n);
+                    int length = Math.Max(1, perHour / 4 + (int)(rng.Next() * perHour / 2));
+                    for (int i = start; i < Math.Min(n, start + length); i++) curve[i] = Math.Max(curve[i], 0.85 + 0.15 * rng.Next());
+                }
             }
             if ((c.Profile ?? "").ToLowerInvariant() != "off")
             {
