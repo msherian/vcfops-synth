@@ -1,0 +1,2 @@
+Host,Datacenter,Cluster,Switch,# Ports,Free Ports,Promiscuous Mode,MTU,VI SDK Server
+esx03.example.test,DC-Dublin,DEV-01,vSwitch0,128,120,False,1500,vc01.example.test

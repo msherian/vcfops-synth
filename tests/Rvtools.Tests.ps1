@@ -35,7 +35,7 @@ BeforeAll {
     function Get-Comparable {
         param($Inventory)
         $copy = [ordered]@{}
-        foreach ($name in 'datacenters', 'clusters', 'hosts', 'datastores', 'vms', 'report') { $copy[$name] = $Inventory[$name] }
+        foreach ($name in 'datacenters', 'clusters', 'hosts', 'datastores', 'switches', 'networks', 'resourcePools', 'folders', 'vms', 'report') { $copy[$name] = $Inventory[$name] }
         $copy | ConvertTo-Json -Depth 20
     }
 }
@@ -121,6 +121,89 @@ Describe 'Import-SynthRvtools from CSV' {
     }
 }
 
+Describe 'The rest of the estate' {
+    BeforeAll { $script:inventory = Import-Fixture }
+
+    It 'builds switches, networks, resource pools and folders' {
+        @($inventory.switches | Where-Object kind -eq 'distributed').Count | Should -Be 1
+        @($inventory.switches | Where-Object kind -eq 'standard').Count | Should -Be 1
+        ($inventory.networks.name | Sort-Object) | Should -Be @('Management Network', 'pg-mgmt', 'pg-prod-app', 'pg-prod-db', 'VM Network')
+        @($inventory.resourcePools).Count | Should -Be 3
+        ($inventory.folders.name | Sort-Object) | Should -Be @('Batch', 'Dev', 'Payments', 'Prod', 'Shop')
+    }
+
+    It 'links distributed port groups to their switch, VLAN and member hosts' {
+        $dvs = $inventory.switches | Where-Object kind -eq 'distributed'
+        $dvs.name | Should -Be 'dvs-prod'
+        $dvs.hosts | Should -HaveCount 2
+        $dvs.mtu | Should -Be 9000
+        $db = $inventory.networks | Where-Object name -eq 'pg-prod-db'
+        $db.kind | Should -Be 'distributed'
+        $db.switch | Should -Be $dvs.id
+        $db.vlan | Should -Be '120'
+        $db.hosts | Should -Be $dvs.hosts
+    }
+
+    It 'gives a standard port group the hosts that carry it' {
+        $esx03 = ($inventory.hosts | Where-Object name -eq 'esx03.example.test').id
+        $vmNetwork = $inventory.networks | Where-Object name -eq 'VM Network'
+        $vmNetwork.kind | Should -Be 'standard'
+        $vmNetwork.hosts | Should -Be @($esx03)
+        $vss = $inventory.switches | Where-Object kind -eq 'standard'
+        $vss.hosts | Should -Be @($esx03)
+        $vss.portGroups | Should -HaveCount 2
+    }
+
+    It 'gives each VM its virtual disks and network adapters' {
+        $vm = Get-Vm $inventory 'sql-pay-01'
+        $vm.storage.disks.label | Should -Be @('Hard disk 1', 'Hard disk 2')
+        $vm.storage.disks.capacityMiB | Should -Be @(51200, 563200)
+        $vm.storage.disks[0].thin | Should -BeTrue
+        $vm.storage.disks[1].datastore | Should -Be ($inventory.datastores | Where-Object name -eq 'vsan-prod').id
+        $vm.nics.network | Should -Be @(
+            ($inventory.networks | Where-Object name -eq 'pg-prod-app').id
+            ($inventory.networks | Where-Object name -eq 'pg-prod-db').id
+        )
+        $vm.nics[0].adapter | Should -Be 'Vmxnet3'
+    }
+
+    It 'places a VM in its folder and resource pool' {
+        $vm = Get-Vm $inventory 'app-pay-01'
+        $folder = $inventory.folders | Where-Object id -eq $vm.folderId
+        $folder.name | Should -Be 'Payments'
+        ($inventory.folders | Where-Object id -eq $folder.parent).name | Should -Be 'Prod'
+        $pool = $inventory.resourcePools | Where-Object id -eq $vm.resourcePoolId
+        $pool.name | Should -Be 'Resources'
+        $pool.cluster | Should -Be $vm.cluster
+        $pool.cpu.reservationMhz | Should -Be 150000
+    }
+
+    It 'nests a child pool under its cluster root and reads -1 as unlimited' {
+        $batch = $inventory.resourcePools | Where-Object name -eq 'Batch'
+        $root = $inventory.resourcePools | Where-Object id -eq $batch.parent
+        $root.name | Should -Be 'Resources'
+        $batch.cluster | Should -Be ($inventory.clusters | Where-Object name -eq 'PROD-01').id
+        $batch.cpu.limitMhz | Should -BeNullOrEmpty
+        $batch.cpu.shares | Should -Be 'high'
+        $batch.memory.expandable | Should -BeTrue
+    }
+
+    It 'gives each host its NICs, HBAs and VMkernel adapters' {
+        $esx01 = $inventory.hosts | Where-Object name -eq 'esx01.example.test'
+        $esx01.nics.device | Should -Be @('vmnic0', 'vmnic1')
+        $esx01.nics[0].speedMbps | Should -Be 25000
+        $esx01.nics[0].switch | Should -Be ($inventory.switches | Where-Object kind -eq 'distributed').id
+        $esx01.hbas.device | Should -Be @('vmhba0')
+        $esx01.vmkernels[0].network | Should -Be ($inventory.networks | Where-Object name -eq 'pg-mgmt').id
+    }
+
+    It 'never reads MAC addresses or VMkernel addresses' {
+        $json = $inventory | ConvertTo-Json -Depth 20
+        $json | Should -Not -Match '00:50:56'
+        $json | Should -Not -Match '255\.255\.255'
+    }
+}
+
 Describe 'Tiering during import' {
     BeforeAll { $script:inventory = Import-Fixture }
 
@@ -151,13 +234,16 @@ Describe 'Anonymised import' {
     }
 
     It 'replaces every name with its ID' {
-        foreach ($set in 'datacenters', 'clusters', 'hosts', 'datastores', 'vms') {
+        foreach ($set in 'datacenters', 'clusters', 'hosts', 'datastores', 'networks', 'folders', 'vms') {
             foreach ($item in $anonymous[$set]) { $item.name | Should -Be $item.id }
         }
+        ($anonymous.switches | Where-Object kind -eq 'distributed').name | Should -Match '^dvs-[0-9a-f]{10}$'
+        ($anonymous.resourcePools | Where-Object name -ne 'Resources').name | Should -Match '^rp-[0-9a-f]{10}$'
     }
 
-    It 'leaves no real name, folder, annotation, snapshot name or path in the output' {
-        foreach ($text in 'app-pay-01', 'esx01', 'PROD-01', 'DC-Dublin', 'vsan-prod', '/Prod/Payments',
+    It 'leaves no real name, folder, network, annotation, snapshot name or path in the output' {
+        foreach ($text in 'app-pay-01', 'esx01', 'PROD-01', 'DC-Dublin', 'vsan-prod', '/Prod/Payments', '"Prod"',
+            'dvs-prod', 'pg-prod', 'pg-mgmt', 'VM Network', '"Shop"', '.vmdk',
             'Tier 1 payments', 'Before October patching', 'mssql', 'C:\\', 'rvtools-4x', 'vc01') {
             $json | Should -Not -Match ([regex]::Escape($text))
         }

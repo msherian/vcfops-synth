@@ -1,0 +1,7 @@
+Host,Datacenter,Cluster,Network Device,Driver,Speed,Duplex,MAC,Switch,Uplink port,PCI,WakeOn,VI SDK Server
+esx01.example.test,DC-Dublin,PROD-01,vmnic0,i40en,25000,True,00:00:00:00:00:00,dvs-prod,,0000:3b:00.0,False,vc01.example.test
+esx01.example.test,DC-Dublin,PROD-01,vmnic1,i40en,25000,True,00:00:00:00:00:00,dvs-prod,,0000:3b:00.0,False,vc01.example.test
+esx02.example.test,DC-Dublin,PROD-01,vmnic0,i40en,25000,True,00:00:00:00:00:00,dvs-prod,,0000:3b:00.0,False,vc01.example.test
+esx02.example.test,DC-Dublin,PROD-01,vmnic1,i40en,25000,True,00:00:00:00:00:00,dvs-prod,,0000:3b:00.0,False,vc01.example.test
+esx03.example.test,DC-Dublin,DEV-01,vmnic0,i40en,25000,True,00:00:00:00:00:00,vSwitch0,,0000:3b:00.0,False,vc01.example.test
+esx03.example.test,DC-Dublin,DEV-01,vmnic1,i40en,25000,True,00:00:00:00:00:00,vSwitch0,,0000:3b:00.0,False,vc01.example.test

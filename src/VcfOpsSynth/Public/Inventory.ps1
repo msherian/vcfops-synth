@@ -4,21 +4,27 @@ function Import-SynthRvtools {
         Turns an RVTools export into the inventory model every later stage works from.
 
     .DESCRIPTION
-        Reads vInfo and vHost (required) and vCPU, vMemory, vCluster, vDatastore,
-        vPartition, vSnapshot, vTools and vMetaData (used when present), joins them
-        by VM, and returns datacenters, clusters, hosts, datastores and VMs with:
+        Reads vInfo and vHost (required) and vCPU, vMemory, vDisk, vPartition,
+        vNetwork, vSnapshot, vTools, vRP, vCluster, vHBA, vNIC, vSwitch, vPort,
+        dvSwitch, dvPort, vSC_VMK, vDatastore and vMetaData (used when present),
+        joins them by VM and host, and returns the whole estate: datacenters,
+        clusters, hosts, datastores, switches, networks (port groups), resource
+        pools, folders and VMs, with:
 
-          - placement: VM to host, cluster, datacenter and datastores;
-          - sizing and configuration: vCPU, memory, disks, guest OS, hardware
-            version, Tools status, snapshots;
+          - placement: VM to host, cluster, datacenter, datastores, folder,
+            resource pool and networks; host to switches and networks;
+          - sizing and configuration: vCPU, memory, virtual disks, network
+            adapters, guest OS, hardware version, Tools status, snapshots; host
+            NICs, HBAs and VMkernel adapters;
           - baselines from RVTools' single usage sample: VM CPU and memory use,
             guest disk use, host CPU and memory use, datastore use;
           - a tier, application and workload profile from the tiering rules.
 
-        Templates and SRM placeholders are skipped. IP addresses, DNS names and
-        MAC addresses are never read. With -Anonymise, names become stable
-        pseudonyms (vm-3f9a2c1d0b), and folders, resource pools, annotations,
-        snapshot names and partition paths are dropped. Tiering rules still see
+        Templates and SRM placeholders are skipped. IP addresses, DNS names, MAC
+        addresses and WWNs are never read. With -Anonymise, names of VMs, hosts,
+        clusters, datacenters, datastores, distributed switches, networks,
+        resource pools and folders become stable pseudonyms (vm-3f9a2c1d0b), and
+        annotations, snapshot names and partition paths are dropped. Tiering rules still see
         the real values, because they run first.
 
         Rows that cannot be used are listed in report.skipped and other problems
@@ -234,9 +240,270 @@ function Import-SynthRvtools {
         }
     }
 
+    $hostById = @{}
+    foreach ($h in $hosts.Values) { $hostById[$h.id] = $h; $h.nics = @(); $h.hbas = @(); $h.vmkernels = @() }
+    $dcIdFor = {
+        param($Server, $Name)
+        if ($Name -and $datacenters.ContainsKey("$Server|$Name")) { $datacenters["$Server|$Name"].id } else { $null }
+    }
+    $splitList = {
+        param($Text)
+        @(([string]$Text) -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+
+    # Switches and port groups: standard ones per host from vSwitch and vPort, distributed ones from dvSwitch and dvPort.
+    $switches = @{}
+    $networks = @{}
+    $networksByName = @{}
+    $addNetwork = {
+        param($NetKey, $Name, $Kind, $SwitchId, $DcId, $Vlan)
+        if (-not $networks.ContainsKey($NetKey)) {
+            $id = & $newId 'net' $NetKey
+            $networks[$NetKey] = [ordered]@{
+                id         = $id
+                name       = (& $label $Name $id)
+                kind       = $Kind
+                switch     = $SwitchId
+                datacenter = $DcId
+                vlan       = $Vlan
+                hosts      = [System.Collections.Generic.List[string]]::new()
+            }
+            $byName = "$($NetKey.Split('|')[0])|$Name"
+            if (-not $networksByName.ContainsKey($byName)) { $networksByName[$byName] = [System.Collections.Generic.List[object]]::new() }
+            $networksByName[$byName].Add($networks[$NetKey])
+        }
+        $networks[$NetKey]
+    }
+    $addHostTo = {
+        param($Record, $HostId)
+        if ($HostId -and -not $Record.hosts.Contains($HostId)) { $Record.hosts.Add($HostId) }
+    }
+
+    if ($tabs.ContainsKey('dvSwitch')) {
+        $t = $tabs.dvSwitch
+        foreach ($row in $t.Rows) {
+            $name = Get-SynthRvCell $row $t.Columns 'name'
+            if (-not $name) { continue }
+            $server = [string](Get-SynthRvCell $row $t.Columns 'server')
+            $swKey = "$server|dvs|$name"
+            if ($switches.ContainsKey($swKey)) { continue }
+            $id = & $newId 'dvs' $swKey
+            $switches[$swKey] = [ordered]@{
+                id         = $id
+                name       = (& $label $name $id)
+                kind       = 'distributed'
+                datacenter = & $dcIdFor $server (Get-SynthRvCell $row $t.Columns 'datacenter')
+                version    = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'version')
+                mtu        = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'maxMtu')
+                ports      = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'ports')
+                hosts      = [System.Collections.Generic.List[string]]::new()
+            }
+            foreach ($member in & $splitList (Get-SynthRvCell $row $t.Columns 'hostMembers')) {
+                $h = & $findHost $server $member
+                if ($h) { & $addHostTo $switches[$swKey] $h.id }
+            }
+        }
+    }
+    if ($tabs.ContainsKey('dvPort')) {
+        $t = $tabs.dvPort
+        foreach ($row in $t.Rows) {
+            $name = Get-SynthRvCell $row $t.Columns 'portGroup'
+            if (-not $name) { continue }
+            $server = [string](Get-SynthRvCell $row $t.Columns 'server')
+            $switchName = Get-SynthRvCell $row $t.Columns 'switch'
+            $sw = if ($switchName) { $switches["$server|dvs|$switchName"] } else { $null }
+            $net = & $addNetwork "$server|dvpg|$switchName|$name" $name 'distributed' $(if ($sw) { $sw.id }) $(if ($sw) { $sw.datacenter }) (ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'vlan'))
+            $net.ports = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'ports')
+            if ($sw) { foreach ($h in $sw.hosts) { & $addHostTo $net $h } }
+        }
+    }
+    if ($tabs.ContainsKey('vSwitch')) {
+        $t = $tabs.vSwitch
+        foreach ($row in $t.Rows) {
+            $server = [string](Get-SynthRvCell $row $t.Columns 'server')
+            $h = & $findHost $server (Get-SynthRvCell $row $t.Columns 'host')
+            $name = Get-SynthRvCell $row $t.Columns 'switch'
+            if (-not $h -or -not $name) { continue }
+            $swKey = "$server|vss|$($h.id)|$name"
+            if ($switches.ContainsKey($swKey)) { continue }
+            $id = & $newId 'vss' $swKey
+            $switches[$swKey] = [ordered]@{
+                id         = $id
+                # Standard switch names (vSwitch0) are the same on every host and identify nothing.
+                name       = $name
+                kind       = 'standard'
+                datacenter = $h.datacenter
+                mtu        = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'mtu')
+                ports      = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'ports')
+                hosts      = [System.Collections.Generic.List[string]]::new()
+            }
+            & $addHostTo $switches[$swKey] $h.id
+        }
+    }
+    if ($tabs.ContainsKey('vPort')) {
+        $t = $tabs.vPort
+        foreach ($row in $t.Rows) {
+            $server = [string](Get-SynthRvCell $row $t.Columns 'server')
+            $h = & $findHost $server (Get-SynthRvCell $row $t.Columns 'host')
+            $name = Get-SynthRvCell $row $t.Columns 'portGroup'
+            if (-not $h -or -not $name) { continue }
+            $switchName = Get-SynthRvCell $row $t.Columns 'switch'
+            $sw = $switches["$server|vss|$($h.id)|$switchName"]
+            # One network per standard port group name in a datacenter, as vCenter shows it.
+            $net = & $addNetwork "$server|pg|$($h.datacenter)|$name" $name 'standard' $null $h.datacenter (ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'vlan'))
+            & $addHostTo $net $h.id
+            if ($sw) {
+                if (-not $sw.Contains('portGroups')) { $sw.portGroups = [System.Collections.Generic.List[string]]::new() }
+                if (-not $sw.portGroups.Contains($net.id)) { $sw.portGroups.Add($net.id) }
+            }
+        }
+    }
+    $findNetwork = {
+        param($Server, $Name, $SwitchName, $DcId)
+        if (-not $Name) { return $null }
+        $candidates = $networksByName["$Server|$Name"]
+        if ($candidates) {
+            $dvs = if ($SwitchName) { $switches["$Server|dvs|$SwitchName"] } else { $null }
+            $bySwitch = @(if ($dvs) { $candidates | Where-Object { $_.switch -eq $dvs.id } })
+            if ($bySwitch.Count) { return $bySwitch[0] }
+            $inDc = @($candidates | Where-Object { $_.datacenter -eq $DcId })
+            if ($inDc.Count) { return $inDc[0] }
+            return $candidates[0]
+        }
+        # A network seen only on a VM adapter, when the switch tabs are missing.
+        $kind = if ($SwitchName -and $switches.ContainsKey("$Server|dvs|$SwitchName")) { 'distributed' } else { 'standard' }
+        & $addNetwork "$Server|pg|$DcId|$Name" $Name $kind $null $DcId $null
+    }
+
+    # Host adapters: physical NICs, HBAs and VMkernel adapters. Addresses, MACs and WWNs are never read.
+    foreach ($spec in @(
+            @{ Tab = 'vNIC'; Into = 'nics' }
+            @{ Tab = 'vHBA'; Into = 'hbas' }
+            @{ Tab = 'vSC_VMK'; Into = 'vmkernels' }
+        )) {
+        if (-not $tabs.ContainsKey($spec.Tab)) { continue }
+        $t = $tabs[$spec.Tab]
+        $lists = @{}
+        foreach ($row in $t.Rows) {
+            $server = [string](Get-SynthRvCell $row $t.Columns 'server')
+            $h = & $findHost $server (Get-SynthRvCell $row $t.Columns 'host')
+            $device = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'device')
+            if (-not $h -or -not $device) { continue }
+            $item = switch ($spec.Tab) {
+                'vNIC' {
+                    [ordered]@{
+                        device    = $device
+                        driver    = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'driver')
+                        speedMbps = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'speedMbps')
+                        duplex    = ConvertTo-SynthBoolean (Get-SynthRvCell $row $t.Columns 'duplex')
+                        switch    = $(
+                            $switchName = Get-SynthRvCell $row $t.Columns 'switch'
+                            $sw = $switches["$server|vss|$($h.id)|$switchName"]
+                            if (-not $sw) { $sw = $switches["$server|dvs|$switchName"] }
+                            if ($sw) { $sw.id } else { $null }
+                        )
+                    }
+                }
+                'vHBA' {
+                    [ordered]@{
+                        device = $device
+                        type   = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'type')
+                        status = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'status')
+                        model  = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'model')
+                        driver = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'driver')
+                    }
+                }
+                'vSC_VMK' {
+                    $net = & $findNetwork $server (Get-SynthRvCell $row $t.Columns 'portGroup') $null $h.datacenter
+                    if ($net) { & $addHostTo $net $h.id }
+                    [ordered]@{
+                        device  = $device
+                        network = if ($net) { $net.id } else { $null }
+                        mtu     = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'mtu')
+                    }
+                }
+            }
+            if (-not $lists.ContainsKey($h.id)) { $lists[$h.id] = [System.Collections.Generic.List[object]]::new() }
+            $lists[$h.id].Add($item)
+        }
+        foreach ($hostId in $lists.Keys) { $hostById[$hostId][$spec.Into] = @($lists[$hostId] | Sort-Object { $_.device }) }
+    }
+
+    # Folders, built from each VM's folder path, one chain per datacenter.
+    $folders = @{}
+    $resolveFolder = {
+        param($Server, $DcId, $Path)
+        $segments = @(([string]$Path) -split '/' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $parent = $null
+        $walked = ''
+        foreach ($segment in $segments) {
+            $walked = "$walked/$segment"
+            $folderKey = "$Server|$DcId|$walked"
+            if (-not $folders.ContainsKey($folderKey)) {
+                $id = & $newId 'folder' $folderKey
+                $folders[$folderKey] = [ordered]@{ id = $id; name = (& $label $segment $id); datacenter = $DcId; parent = $parent }
+            }
+            $parent = $folders[$folderKey].id
+        }
+        $parent
+    }
+
+    # Resource pools, from vRP and each VM's pool. Paths read /<datacenter>/<cluster>/Resources/<pool>/...
+    # (older releases put /host/ before the cluster); a cluster's root pool is always called Resources.
+    $pools = @{}
+    $resolvePool = {
+        param($Server, $ClusterId, $Path)
+        $segments = @(([string]$Path) -split '/' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        if ($segments.Count -eq 0) { return $null }
+        $root = [array]::IndexOf(@($segments | ForEach-Object { $_.ToLowerInvariant() }), 'resources')
+        if ($root -gt 0 -and $clusters.ContainsKey("$Server|$($segments[$root - 1])")) {
+            $ClusterId = $clusters["$Server|$($segments[$root - 1])"].id
+        }
+        $chain = if ($root -ge 0) { @($segments[$root..($segments.Count - 1)]) } else { @('Resources') + $segments }
+        $parent = $null
+        $walked = ''
+        $pool = $null
+        foreach ($segment in $chain) {
+            $walked = "$walked/$segment"
+            $poolKey = "$Server|$ClusterId|$walked"
+            if (-not $pools.ContainsKey($poolKey)) {
+                $id = & $newId 'rp' $poolKey
+                $pools[$poolKey] = [ordered]@{
+                    id      = $id
+                    name    = if ($null -eq $parent -and $segment -ieq 'Resources') { 'Resources' } else { & $label $segment $id }
+                    cluster = $ClusterId
+                    parent  = $parent
+                    cpu     = [ordered]@{ reservationMhz = $null; limitMhz = $null; shares = $null; expandable = $null }
+                    memory  = [ordered]@{ reservationMiB = $null; limitMiB = $null; shares = $null; expandable = $null }
+                }
+            }
+            $pool = $pools[$poolKey]
+            $parent = $pool.id
+        }
+        $pool
+    }
+    if ($tabs.ContainsKey('vRP')) {
+        $t = $tabs.vRP
+        foreach ($row in $t.Rows) {
+            $server = [string](Get-SynthRvCell $row $t.Columns 'server')
+            $path = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'path')
+            if (-not $path) { $path = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'name') }
+            $pool = & $resolvePool $server $null $path
+            if (-not $pool) { continue }
+            $pool.cpu.reservationMhz = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'cpuReservationMhz')
+            $pool.cpu.limitMhz = ConvertTo-SynthLimit (ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'cpuLimitMhz'))
+            $pool.cpu.shares = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'cpuShares')
+            $pool.cpu.expandable = ConvertTo-SynthBoolean (Get-SynthRvCell $row $t.Columns 'cpuExpandable')
+            $pool.memory.reservationMiB = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'memReservationMiB')
+            $pool.memory.limitMiB = ConvertTo-SynthLimit (ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'memLimitMiB'))
+            $pool.memory.shares = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'memShares')
+            $pool.memory.expandable = ConvertTo-SynthBoolean (Get-SynthRvCell $row $t.Columns 'memExpandable')
+        }
+    }
+
     # Per-VM tabs, indexed by the same key as vInfo rows.
     $byVm = @{}
-    foreach ($name in 'vCPU', 'vMemory', 'vTools', 'vPartition', 'vSnapshot') {
+    foreach ($name in 'vCPU', 'vMemory', 'vTools', 'vPartition', 'vSnapshot', 'vDisk', 'vNetwork') {
         $byVm[$name] = @{}
         if (-not $tabs.ContainsKey($name)) { continue }
         $t = $tabs[$name]
@@ -355,6 +622,49 @@ function Import-SynthRvtools {
                     })
             }
         }
+        $disks = [System.Collections.Generic.List[object]]::new()
+        if ($byVm.vDisk.ContainsKey($vmKey)) {
+            foreach ($d in $byVm.vDisk[$vmKey]) {
+                $diskStore = $null
+                $diskFile = [string](Get-SynthRvCell $d.Row $d.Columns 'diskPath')
+                if (-not $diskFile) { $diskFile = [string](Get-SynthRvCell $d.Row $d.Columns 'filePath') }
+                if ($diskFile -match '^\[(?<ds>[^\]]+)\]') {
+                    $dsKey = "$server|$($Matches.ds)"
+                    if ($datastores.ContainsKey($dsKey)) { $diskStore = $datastores[$dsKey].id }
+                }
+                $disks.Add([ordered]@{
+                        label       = ConvertTo-SynthText (Get-SynthRvCell $d.Row $d.Columns 'label')
+                        capacityMiB = ConvertTo-SynthNumber (Get-SynthRvCell $d.Row $d.Columns 'capacityMiB')
+                        thin        = ConvertTo-SynthBoolean (Get-SynthRvCell $d.Row $d.Columns 'thin')
+                        mode        = ConvertTo-SynthText (Get-SynthRvCell $d.Row $d.Columns 'diskMode')
+                        controller  = ConvertTo-SynthText (Get-SynthRvCell $d.Row $d.Columns 'controller')
+                        unit        = ConvertTo-SynthNumber (Get-SynthRvCell $d.Row $d.Columns 'unit')
+                        datastore   = $diskStore
+                    })
+                if ($diskStore -and $diskStore -notin $datastoreIds) { $datastoreIds += $diskStore }
+            }
+        }
+
+        $nics = [System.Collections.Generic.List[object]]::new()
+        if ($byVm.vNetwork.ContainsKey($vmKey)) {
+            foreach ($n in $byVm.vNetwork[$vmKey]) {
+                $net = & $findNetwork $server (Get-SynthRvCell $n.Row $n.Columns 'network') (Get-SynthRvCell $n.Row $n.Columns 'switch') $dcId
+                if ($net -and $hostRecord) { & $addHostTo $net $hostRecord.id }
+                $nics.Add([ordered]@{
+                        label     = ConvertTo-SynthText (Get-SynthRvCell $n.Row $n.Columns 'label')
+                        adapter   = ConvertTo-SynthText (Get-SynthRvCell $n.Row $n.Columns 'adapter')
+                        network   = if ($net) { $net.id } else { $null }
+                        connected = ConvertTo-SynthBoolean (Get-SynthRvCell $n.Row $n.Columns 'connected')
+                    })
+            }
+        }
+
+        # Some exports leave Folder empty and give only the folder's object ID, which still groups VMs.
+        $folderPath = Get-SynthRvCell $row $t.Columns 'folder'
+        if (-not $folderPath) { $folderPath = Get-SynthRvCell $row $t.Columns 'folderRef' }
+        $folderId = & $resolveFolder $server $dcId $folderPath
+        $pool = & $resolvePool $server $(if ($cluster) { $cluster.id }) (Get-SynthRvCell $row $t.Columns 'resourcePool')
+
         $diskCapacity = ($partitions | ForEach-Object { $_.capacityMiB } | Measure-Object -Sum).Sum
         $diskConsumed = ($partitions | ForEach-Object { $_.consumedMiB } | Measure-Object -Sum).Sum
 
@@ -406,6 +716,8 @@ function Import-SynthRvtools {
             cluster         = if ($cluster) { $cluster.id } else { $null }
             host            = if ($hostRecord) { $hostRecord.id } else { $null }
             datastores      = $datastoreIds
+            folderId        = $folderId
+            resourcePoolId  = if ($pool) { $pool.id } else { $null }
             tier            = $assigned.tier
             application     = $assigned.application
             profile         = $assigned.profile
@@ -435,7 +747,9 @@ function Import-SynthRvtools {
                 provisionedMiB = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'provisionedMiB')
                 inUseMiB       = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'inUseMiB')
                 partitions     = @($partitions)
+                disks          = @($disks)
             }
+            nics            = @($nics)
             snapshots       = @($snapshots | Sort-Object { $_.created })
             baseline        = $baseline
         }
@@ -463,8 +777,10 @@ function Import-SynthRvtools {
     }
 
     $sorted = { param($Table) @($Table.Values | Sort-Object { $_.id }) }
+    foreach ($record in @($switches.Values) + @($networks.Values)) { $record.hosts = @($record.hosts | Sort-Object) }
+    foreach ($record in $switches.Values) { if ($record.Contains('portGroups')) { $record.portGroups = @($record.portGroups | Sort-Object) } }
     [ordered]@{
-        schemaVersion = 1
+        schemaVersion = 2
         importedAt    = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture)
         source        = [ordered]@{
             format         = $source.Format
@@ -478,6 +794,10 @@ function Import-SynthRvtools {
         clusters      = @(& $sorted $clusters)
         hosts         = @(& $sorted $hosts)
         datastores    = @(& $sorted $datastores)
+        switches      = @(& $sorted $switches)
+        networks      = @(& $sorted $networks)
+        resourcePools = @(& $sorted $pools)
+        folders       = @(& $sorted $folders)
         vms           = @(& $sorted $vms)
         report        = [ordered]@{
             warnings = @($report.warnings)
@@ -515,8 +835,8 @@ function Get-SynthInventory {
         throw "No inventory at '$Path'. Run 'import' first."
     }
     $inventory = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable
-    if ($inventory.schemaVersion -ne 1) {
-        throw "Inventory '$Path' has schema version $($inventory.schemaVersion); this build reads version 1. Run 'import' again."
+    if ($inventory.schemaVersion -ne 2) {
+        throw "Inventory '$Path' has schema version $($inventory.schemaVersion); this build reads version 2. Run 'import' again."
     }
     $inventory
 }
@@ -531,13 +851,17 @@ function Get-SynthInventorySummary {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Inventory)
 
     $count = {
-        param($Items, $Noun)
+        param($Items, $Noun, $Plural = "$($Noun)s")
         $n = @($Items).Count
-        "$n $Noun$(if ($n -ne 1) { 's' })"
+        "$n $(if ($n -eq 1) { $Noun } else { $Plural })"
     }
     $vms = @($Inventory.vms)
     $on = @($vms | Where-Object { $_.powerState -eq 'poweredOn' }).Count
     "$(& $count $vms 'VM') ($on powered on) on $(& $count $Inventory.hosts 'host') in $(& $count $Inventory.clusters 'cluster'), $(& $count $Inventory.datastores 'datastore'), $(& $count $Inventory.datacenters 'datacenter')"
+
+    if (@($Inventory.networks).Count -or @($Inventory.resourcePools).Count) {
+        "$(& $count $Inventory.networks 'network') on $(& $count $Inventory.switches 'switch' 'switches'), $(& $count $Inventory.resourcePools 'resource pool'), $(& $count $Inventory.folders 'folder')"
+    }
 
     $tiers = foreach ($tier in Get-SynthTierName) {
         $count = @($vms | Where-Object { $_.tier -eq $tier }).Count

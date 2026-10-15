@@ -4,7 +4,7 @@ The full design plan is a shared document: [VCF 9.1 Operations Synthetic Data To
 
 ## Decisions
 
-- **Inventory comes from RVTools.** vInfo, vCPU, vMemory, vHost, vCluster, vDatastore, vPartition, vSnapshot and vTools give placement, sizing, configuration and one usage sample per object. Those samples become baselines for generated history.
+- **Inventory comes from RVTools, and the lab is reference only.** The VM, host, cluster, datastore, network and resource pool tabs describe a whole estate, which the toolset recreates as synthetic objects: every datacenter, cluster, host, datastore, switch, network, resource pool and folder in the export gets a synthetic counterpart, and each synthetic VM lives under its own imported parents, never under real lab objects. RVTools also gives one usage sample per object. Those samples become baselines for generated history.
 - **Metrics go straight into the Suite API.** Objects are created under a push adapter kind (`adapterKind.key`), mirroring the vSphere resource kinds and using the same metric keys. History is pushed with `disableAnalyticsProcessing=true`, then a live feed runs with analytics on so symptoms and alerts fire.
 - **Optional live load.** Where the API cannot supply something (stock vSphere content on real objects, 20-second Workbench data, NSX traffic, in-guest metrics), UPSA pairs and small Photon OS load VMs generate real data in the Holodeck workload domain, within the caps in `liveLoad`.
 - **One image.** PowerShell 7 on Linux, ImportExcel for xlsx, published to GHCR; Docker Hub later.

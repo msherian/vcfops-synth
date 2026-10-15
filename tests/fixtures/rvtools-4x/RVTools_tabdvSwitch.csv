@@ -1,0 +1,2 @@
+Switch,Datacenter,Name,Vendor,Version,Description,Created,Host members,Max Ports,# Ports,# VMs,Max MTU,Object ID,VI SDK Server
+dvs-prod,DC-Dublin,DVS,"VMware, Inc.",8.0.3,,2024-01-01 00:00:00,"esx01.example.test, esx02.example.test",2147483647,512,4,9000,dvs-1,vc01.example.test
