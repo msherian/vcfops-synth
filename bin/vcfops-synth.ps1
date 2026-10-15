@@ -21,6 +21,8 @@
                           (default import.source in lab.json).
                           --output <path>    where to write the model (default paths.inventory)
                           --tiering <path>   tiering rules (default import.tiering)
+                          --perf <path>      LiveOptics VMware workbook: per-VM and per-host
+                                             averages and peaks (default import.performance)
                           --no-anonymise     keep real names; only for exports you may share as is
 
     Commands still to come, by build phase:
@@ -98,11 +100,11 @@ function Read-ImportArgument {
     param([string[]]$Argument)
     # Plain 'import' passes no arguments at all, and StrictMode refuses .Count on $null.
     if (-not $Argument) { $Argument = @() }
-    $parsed = @{ Source = $null; Output = $null; Tiering = $null; Anonymise = $null }
+    $parsed = @{ Source = $null; Output = $null; Tiering = $null; Perf = $null; Anonymise = $null }
     for ($i = 0; $i -lt $Argument.Count; $i++) {
         $arg = $Argument[$i]
         switch -Regex ($arg) {
-            '^--(output|tiering)$' {
+            '^--(output|tiering|perf)$' {
                 if ($i + 1 -ge $Argument.Count) { throw [System.ArgumentException]::new("$arg needs a path.") }
                 $parsed[(Get-Culture).TextInfo.ToTitleCase($Matches[1])] = $Argument[++$i]
                 break
@@ -205,8 +207,11 @@ try {
             }
             $rules = Get-SynthTieringRule -Path $tieringPath
 
+            $perfPath = if ($options.Perf) { $options.Perf } else { $config.import.performance }
+            $perfData = if ($perfPath) { Read-SynthLiveOptics -Path $perfPath } else { $null }
+
             $key = Get-SynthAnonymisationKey -DataPath $config.paths.data
-            $inventory = Import-SynthRvtools -Path $source -Key $key -TieringRules $rules -Anonymise:$anonymise
+            $inventory = Import-SynthRvtools -Path $source -Key $key -TieringRules $rules -Anonymise:$anonymise -Performance $perfData
             Save-SynthInventory -Inventory $inventory -Path $output
 
             Write-Host "Imported $source to $output."

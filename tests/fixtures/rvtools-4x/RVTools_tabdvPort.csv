@@ -1,0 +1,4 @@
+Port,Switch,Type,# Ports,VLAN,Speed,Full Duplex,Blocked,Object ID,VI SDK Server
+pg-prod-app,dvs-prod,earlyBinding,128,110,,,False,dvportgroup-11,vc01.example.test
+pg-prod-db,dvs-prod,earlyBinding,128,120,,,False,dvportgroup-12,vc01.example.test
+pg-mgmt,dvs-prod,earlyBinding,16,10,,,False,dvportgroup-13,vc01.example.test

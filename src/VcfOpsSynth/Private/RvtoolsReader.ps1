@@ -19,7 +19,7 @@ function Read-SynthRvtoolsSource {
     [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)][string]$Path,
-        [string[]]$Tab = @('vInfo', 'vCPU', 'vMemory', 'vHost', 'vCluster', 'vDatastore', 'vPartition', 'vSnapshot', 'vTools', 'vMetaData')
+        [string[]]$Tab = @('vInfo', 'vCPU', 'vMemory', 'vDisk', 'vPartition', 'vNetwork', 'vSnapshot', 'vTools', 'vRP', 'vCluster', 'vHost', 'vHBA', 'vNIC', 'vSwitch', 'vPort', 'dvSwitch', 'dvPort', 'vSC_VMK', 'vDatastore', 'vMetaData')
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {

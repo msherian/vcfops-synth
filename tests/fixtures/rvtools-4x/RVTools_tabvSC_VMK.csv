@@ -1,0 +1,4 @@
+Host,Datacenter,Cluster,Port Group,Device,Mac Address,DHCP,IP Address,IP 6 Address,Subnet mask,Gateway,IP 6 Gateway,MTU,VI SDK Server
+esx01.example.test,DC-Dublin,PROD-01,pg-mgmt,vmk0,00:00:00:00:00:00,False,192.0.2.200,,255.255.255.0,192.0.2.1,,1500,vc01.example.test
+esx02.example.test,DC-Dublin,PROD-01,pg-mgmt,vmk0,00:00:00:00:00:00,False,192.0.2.200,,255.255.255.0,192.0.2.1,,1500,vc01.example.test
+esx03.example.test,DC-Dublin,DEV-01,Management Network,vmk0,00:00:00:00:00:00,False,192.0.2.200,,255.255.255.0,192.0.2.1,,1500,vc01.example.test

@@ -103,6 +103,19 @@ Describe 'vcfops-synth CLI' {
             $result.Output | Should -BeLike '*8 VMs (7 powered on) on 3 hosts*'
         }
 
+        It 'joins LiveOptics performance with --perf' -Skip:(-not (Get-Module -ListAvailable -Name ImportExcel)) {
+            Import-Module ImportExcel -WarningAction SilentlyContinue
+            $perf = Join-Path $TestDrive 'liveoptics.xlsx'
+            [pscustomobject]@{ 'VM Name' = 'app-pay-01'; 'MOB ID' = 'vm-1001'; 'Average vCPU %' = 30; 'Peak vCPU %' = 90 } |
+                Export-Excel -Path $perf -WorksheetName 'VM Performance'
+            [pscustomobject]@{ Host = 'esx01.example.test'; 'Average CPU %' = 35; 'Peak CPU %' = 80 } |
+                Export-Excel -Path $perf -WorksheetName 'ESX Performance'
+            $output = Join-Path $TestDrive 'with-perf.json'
+            $result = Invoke-Cli @('import', $script:fixture, '--perf', $perf, '--output', $output, '-ConfigPath', $script:lab)
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -BeLike '*Performance: LiveOptics for 1 of 8 VMs and 1 of 3 hosts*'
+        }
+
         It 'rejects an unknown option' {
             $result = Invoke-Cli @('import', '--frobnicate', '-ConfigPath', $script:lab)
             $result.ExitCode | Should -Be 2

@@ -1,0 +1,3 @@
+Host,Datacenter,Cluster,Port Group,Switch,VLAN,Promiscuous Mode,VI SDK Server
+esx03.example.test,DC-Dublin,DEV-01,VM Network,vSwitch0,0,False,vc01.example.test
+esx03.example.test,DC-Dublin,DEV-01,Management Network,vSwitch0,10,False,vc01.example.test

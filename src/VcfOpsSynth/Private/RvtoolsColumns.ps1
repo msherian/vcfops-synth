@@ -35,6 +35,7 @@ function Get-SynthRvtoolsColumnMap {
             inUseMiB       = @{ Headers = @('In Use MiB', 'In Use MB') }
             resourcePool   = @{ Headers = @('Resource pool') }
             folder         = @{ Headers = @('Folder') }
+            folderRef      = @{ Headers = @('Folder ID') }
             annotation     = @{ Headers = @('Annotation') }
             datacenter     = @{ Headers = @('Datacenter') }
             cluster        = @{ Headers = @('Cluster') }
@@ -116,9 +117,100 @@ function Get-SynthRvtoolsColumnMap {
             rvtoolsVersion = @{ Headers = @('RVTools version', 'RVTools Version') }
             created        = @{ Headers = @('xlsx creation datetime', 'Creation date') }
         }
+        # Virtual disks. Disk Path and Path are read only for the datastore in their [brackets].
+        vDisk      = @{
+            label       = @{ Headers = @('Disk') }
+            capacityMiB = @{ Headers = @('Capacity MiB', 'Capacity MB') }
+            thin        = @{ Headers = @('Thin') }
+            diskMode    = @{ Headers = @('Disk Mode') }
+            controller  = @{ Headers = @('Controller') }
+            unit        = @{ Headers = @('Unit #') }
+            diskPath    = @{ Headers = @('Disk Path') }
+            filePath    = @{ Headers = @('Path') }
+        }
+        # VM network adapters. MAC and IP columns are never read.
+        vNetwork   = @{
+            label     = @{ Headers = @('NIC label', 'Network label') }
+            adapter   = @{ Headers = @('Adapter') }
+            network   = @{ Headers = @('Network') }
+            switch    = @{ Headers = @('Switch') }
+            connected = @{ Headers = @('Connected') }
+        }
+        vSwitch    = @{
+            host   = @{ Headers = @('Host'); Required = $true }
+            switch = @{ Headers = @('Switch'); Required = $true }
+            ports  = @{ Headers = @('# Ports') }
+            mtu    = @{ Headers = @('MTU') }
+            server = @{ Headers = @('VI SDK Server') }
+        }
+        vPort      = @{
+            host      = @{ Headers = @('Host'); Required = $true }
+            portGroup = @{ Headers = @('Port Group'); Required = $true }
+            switch    = @{ Headers = @('Switch') }
+            vlan      = @{ Headers = @('VLAN') }
+            server    = @{ Headers = @('VI SDK Server') }
+        }
+        dvSwitch   = @{
+            name        = @{ Headers = @('Switch', 'Name'); Required = $true }
+            datacenter  = @{ Headers = @('Datacenter') }
+            version     = @{ Headers = @('Version') }
+            hostMembers = @{ Headers = @('Host members') }
+            maxMtu      = @{ Headers = @('Max MTU') }
+            ports       = @{ Headers = @('# Ports') }
+            server      = @{ Headers = @('VI SDK Server') }
+        }
+        dvPort     = @{
+            portGroup = @{ Headers = @('Port'); Required = $true }
+            switch    = @{ Headers = @('Switch') }
+            type      = @{ Headers = @('Type') }
+            ports     = @{ Headers = @('# Ports') }
+            vlan      = @{ Headers = @('VLAN') }
+            server    = @{ Headers = @('VI SDK Server') }
+        }
+        # Host physical NICs. The MAC column is never read.
+        vNIC       = @{
+            host      = @{ Headers = @('Host'); Required = $true }
+            device    = @{ Headers = @('Network Device', 'Device'); Required = $true }
+            driver    = @{ Headers = @('Driver') }
+            speedMbps = @{ Headers = @('Speed') }
+            duplex    = @{ Headers = @('Duplex') }
+            switch   = @{ Headers = @('Switch') }
+            server   = @{ Headers = @('VI SDK Server') }
+        }
+        # Host bus adapters. The WWN column is never read.
+        vHBA       = @{
+            host   = @{ Headers = @('Host'); Required = $true }
+            device = @{ Headers = @('Device'); Required = $true }
+            type   = @{ Headers = @('Type') }
+            status = @{ Headers = @('Status') }
+            model  = @{ Headers = @('Model') }
+            driver = @{ Headers = @('Driver') }
+            server = @{ Headers = @('VI SDK Server') }
+        }
+        # Host VMkernel adapters. Address, mask, gateway and MAC columns are never read.
+        vSC_VMK    = @{
+            host      = @{ Headers = @('Host'); Required = $true }
+            device    = @{ Headers = @('Device'); Required = $true }
+            portGroup = @{ Headers = @('Port Group') }
+            mtu       = @{ Headers = @('MTU') }
+            server    = @{ Headers = @('VI SDK Server') }
+        }
+        vRP        = @{
+            name              = @{ Headers = @('Resource Pool name', 'Name'); Required = $true }
+            path              = @{ Headers = @('Resource Pool path', 'Path') }
+            cpuLimitMhz       = @{ Headers = @('CPU limit') }
+            cpuReservationMhz = @{ Headers = @('CPU reservation') }
+            cpuShares         = @{ Headers = @('CPU level') }
+            cpuExpandable     = @{ Headers = @('CPU expandableReservation') }
+            memLimitMiB       = @{ Headers = @('Mem limit') }
+            memReservationMiB = @{ Headers = @('Mem reservation') }
+            memShares         = @{ Headers = @('Mem level') }
+            memExpandable     = @{ Headers = @('Mem expandableReservation') }
+            server            = @{ Headers = @('VI SDK Server') }
+        }
     }
 
-    foreach ($tab in 'vInfo', 'vCPU', 'vMemory', 'vPartition', 'vSnapshot', 'vTools') {
+    foreach ($tab in 'vInfo', 'vCPU', 'vMemory', 'vPartition', 'vSnapshot', 'vTools', 'vDisk', 'vNetwork') {
         foreach ($field in $vmKey.Keys) { $map[$tab][$field] = $vmKey[$field] }
     }
     $map

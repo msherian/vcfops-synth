@@ -1,0 +1,4 @@
+Resource Pool name,Resource Pool path,Status,# VMs total,# VMs,CPU limit,CPU reservation,CPU level,CPU expandableReservation,Mem limit,Mem reservation,Mem level,Mem expandableReservation,Object ID,VI SDK Server
+Resources,/DC-Dublin/PROD-01/Resources,green,5,5,150000,150000,normal,False,1000000,1000000,normal,False,resgroup-8,vc01.example.test
+Resources,/DC-Dublin/DEV-01/Resources,green,4,4,75000,75000,normal,False,500000,500000,normal,False,resgroup-9,vc01.example.test
+Batch,/DC-Dublin/PROD-01/Resources/Batch,green,0,0,-1,10000,high,True,-1,8192,normal,True,resgroup-10,vc01.example.test

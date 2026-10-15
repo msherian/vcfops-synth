@@ -1,0 +1,4 @@
+Host,Datacenter,Cluster,Device,Type,Status,Bus,Pci,Driver,Model,WWN,VI SDK Server
+esx01.example.test,DC-Dublin,PROD-01,vmhba0,Block SCSI,unknown,,0000:18:00.0,lsi_msgpt3,Example SAS HBA,,vc01.example.test
+esx02.example.test,DC-Dublin,PROD-01,vmhba0,Block SCSI,unknown,,0000:18:00.0,lsi_msgpt3,Example SAS HBA,,vc01.example.test
+esx03.example.test,DC-Dublin,DEV-01,vmhba0,Block SCSI,unknown,,0000:18:00.0,lsi_msgpt3,Example SAS HBA,,vc01.example.test
