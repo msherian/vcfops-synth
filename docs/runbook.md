@@ -16,6 +16,7 @@ Run on 15 October 2026 against the Holodeck lab (`ops-a.site-a.mars.local`, sign
 | 0.3 | Views through the API? | Import yes; list unsupported only; no delete |
 | 0.3 | Dashboards through the API? | Import yes; no list or delete |
 | 0.4 | Importer on a real RVTools export of vc-mgmt-a | Not run yet; waiting for an export |
+| 0.5 | Synthetic objects identical to a real one (rubric) | Yes for stat keys and properties; collection status and relationships still differ |
 
 ### Set-up
 
@@ -77,6 +78,39 @@ Decision for Phase 5 to 7: groups, super metrics and policies can be fully manag
 ### 0.4 RVTools import on vc-mgmt-a
 
 Not run yet. Needs an RVTools export of vc-mgmt-a; the run will be `pwsh ./bin/vcfops-synth.ps1 import <export.xlsx>`.
+
+### 0.5 Rubrics: synthetic objects that match real ones
+
+Requirement: every synthetic object carries exactly the metrics and properties of a real object of the same kind. The rubric for each kind is captured from a real object in the lab.
+
+Capture, per kind: `GET /api/resources?adapterKind=VMWARE&resourceKind={kind}` to pick a live object under the vc-mgmt-a adapter instance, then `GET /api/resources/{id}/statkeys`, `GET /api/resources/stats/latest?resourceId={id}` and `GET /api/resources/{id}/properties`. The rubric files hold real names and values, so they live in `data/rubrics/` (gitignored) and are captured per lab, never committed.
+
+| Kind | Rubric source | Stat keys | Properties |
+|---|---|---|---|
+| VirtualMachine | auto-platform-a-nn4ks | 657 | 399 |
+| HostSystem | esx-03a | 249 | 115 |
+| ClusterComputeResource | cluster-mgmt-01a | 237 | 39 |
+| Datastore | vsan-mgmt-01a | 60 | 20 |
+| Datacenter | dc-mgmt-a | 150 | 8 |
+| VMFolder | Discovered virtual machine | 15 | 8 |
+| DistributedVirtualPortgroup | vsan-vds02-mgmt-01a | 20 | 26 |
+| VmwareDistributedVirtualSwitch | vds02-mgmt-01a | 45 | 9 |
+
+About 300 of the VM's stat keys and most of its properties are per instance (`virtualDisk:scsi0:N|...`, NICs, guest file systems). So a synthetic VM's rubric has to be expanded from its own disk and NIC counts (from RVTools), not copied blindly from one reference VM.
+
+Test: created `Synth-spike05-vm01` as `VMWARE/VirtualMachine` under the vc-mgmt-a adapter instance (`POST /api/resources/adapters/{id}`, all six VM identifiers, the real vCenter's `VMEntityVCID`). Then pushed all 657 stat keys (`POST /api/resources/{id}/stats`, `stat-content`) and all 399 properties (`POST /api/resources/{id}/properties`, `property-content`, numbers as `data` and strings as `values`, with the reference VM's name and id replaced). After one collection cycle:
+
+- Stat keys: 657 on both, **none missing, none extra**.
+- Properties: 399 on both, **none missing, none extra, no values differing** (apart from the substituted name).
+- Operations computed health (100, GREEN), risk, efficiency and workload badges for it, as for a real VM.
+
+Still different from a real VM:
+
+1. **Collection status.** A live real VM shows `STARTED/DATA_RECEIVING` from its vCenter adapter. The synthetic VM shows `NONE` from the vCenter adapter and `DATA_RECEIVING` from the "VCF Operations API" adapter instance, because that is where pushed data arrives. The UI shows this as a collection state, and it cannot be changed through the API.
+2. **Relationships.** A real VM has a host, datastore, folder and port group as parents. The synthetic VM has none. Giving it real parents changes the real objects' roll-ups; the alternative is a fully synthetic tree (Synth- datacenter, cluster, hosts, datastores) under the same adapter instance.
+3. **Freshness.** One pushed sample makes the keys exist, but the values go stale unless a live feed (Phase 6) keeps pushing every collection cycle.
+
+Note on the reference VM: auto-platform-a-nn4ks went `NOT_EXISTING` at 17:08 UTC during the test, because the VCF Automation platform replaced that node VM. The rubric was captured before that, but the toolset should pick its rubric source from objects in `STARTED/DATA_RECEIVING` state and capture again when the source disappears.
 
 ### Left behind
 
