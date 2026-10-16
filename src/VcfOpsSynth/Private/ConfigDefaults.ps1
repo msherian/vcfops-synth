@@ -123,7 +123,15 @@ function Get-SynthSecret {
     $readFile = {
         param($File, $From)
         if (-not (Test-Path -LiteralPath $File)) { throw "$From points at '$File', which does not exist." }
-        ConvertTo-SecureString -String ((Get-Content -LiteralPath $File -Raw).TrimEnd("`r", "`n")) -AsPlainText -Force
+        $text = (Get-Content -LiteralPath $File -Raw).TrimEnd("`r", "`n")
+        # A whole installer credentials file would otherwise be sent as the password.
+        if ($text -match '^\s*\{' -and $text -match '"components"') {
+            $doc = try { $text | ConvertFrom-Json -AsHashtable } catch { $null }
+            if ($doc -is [System.Collections.IDictionary] -and $doc.Contains('components')) {
+                throw "$From points at '$File', a VCF installer credentials file, not a password; pass it as -CredentialFile (VCFOPS_CREDENTIAL_FILE)."
+            }
+        }
+        ConvertTo-SecureString -String $text -AsPlainText -Force
     }
     $fromSecret = {
         param($Name, $From)

@@ -104,6 +104,60 @@ Describe 'Test-SynthConfig' {
     }
 }
 
+Describe 'Read-SynthCredentialFile' {
+    BeforeAll {
+        function New-CredFile {
+            param([object[]]$Components)
+            $path = Join-Path $TestDrive "creds-$([guid]::NewGuid()).json"
+            @{ components = $Components } | ConvertTo-Json -Depth 10 | Set-Content -Path $path
+            $path
+        }
+        function New-Component {
+            param([string]$Name, [string]$Fqdn, [hashtable[]]$Credentials)
+            @{ componentName = $Name; FQDN = $Fqdn; credentials = $Credentials }
+        }
+        $script:admin = @{ type = 'Administrator credentials'; user = 'admin'; password = 'ops-pass-1' }
+        $script:root = @{ type = 'Root credentials'; user = 'root'; password = 'root-pass-1' }
+    }
+
+    It 'takes the host, account and password from the VCF Operations entry' {
+        $path = New-CredFile @(
+            (New-Component 'vCenter' 'vc.example.test' @(@{ type = 'Administrator credentials'; user = 'administrator@vsphere.local'; password = 'vc-pass' })),
+            (New-Component 'VCF Operations' 'ops.example.test' @($script:root, $script:admin)))
+        $cred = Read-SynthCredentialFile -Path $path
+        $cred.Fqdn | Should -Be 'ops.example.test'
+        $cred.Username | Should -Be 'admin'
+        ConvertFrom-SecureString $cred.Password -AsPlainText | Should -Be 'ops-pass-1'
+    }
+
+    It 'cuts a URL down to its host name' {
+        $path = New-CredFile @(, (New-Component 'VCF Operations' 'https://ops.example.test/ui/' @($script:admin)))
+        (Read-SynthCredentialFile -Path $path).Fqdn | Should -Be 'ops.example.test'
+    }
+
+    It 'picks one of several VCF Operations by -Fqdn, and asks for it otherwise' {
+        $other = @{ type = 'Administrator credentials'; user = 'admin'; password = 'ops-pass-2' }
+        $path = New-CredFile @(
+            (New-Component 'VCF Operations' 'ops-a.example.test' @($script:admin)),
+            (New-Component 'VCF Operations' 'ops-b.example.test' @($other)))
+        ConvertFrom-SecureString (Read-SynthCredentialFile -Path $path -Fqdn 'OPS-B.example.test').Password -AsPlainText | Should -Be 'ops-pass-2'
+        { Read-SynthCredentialFile -Path $path } | Should -Throw '*lists 2 VCF Operations (ops-a.example.test, ops-b.example.test); choose one with -Fqdn*'
+    }
+
+    It 'says what is missing' {
+        { Read-SynthCredentialFile -Path (Join-Path $TestDrive 'absent.json') } | Should -Throw '*does not exist*'
+        { Read-SynthCredentialFile -Path (New-CredFile @(, (New-Component 'vCenter' 'vc.example.test' @($script:admin)))) } | Should -Throw '*has no VCF Operations entry*'
+        { Read-SynthCredentialFile -Path (New-CredFile @(, (New-Component 'VCF Operations' 'ops.example.test' @($script:root)))) } | Should -Throw "*no Administrator credentials for VCF Operations at 'ops.example.test'*"
+        $notCreds = Join-Path $TestDrive 'not-creds.json'
+        Set-Content -Path $notCreds -Value '{ "operations": {} }'
+        { Read-SynthCredentialFile -Path $notCreds } | Should -Throw '*not a VCF installer credentials file*'
+    }
+
+    It 'stops -PasswordFile sending a whole credentials file as the password' {
+        $path = New-CredFile @(, (New-Component 'VCF Operations' 'ops.example.test' @($script:admin)))
+        { Get-SynthSecret -PasswordFile $path } | Should -Throw '*a VCF installer credentials file, not a password; pass it as -CredentialFile*'
+    }
+}
 Describe 'Get-SynthSecret' {
     BeforeEach {
         Remove-Item Env:VCFOPS_PASSWORD, Env:VCFOPS_PASSWORD_FILE, Env:VCFOPS_SECRET_NAME -ErrorAction SilentlyContinue

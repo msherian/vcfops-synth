@@ -71,7 +71,12 @@
         -PasswordFile     a file holding the password (VCFOPS_PASSWORD_FILE)
         -SecretName       a Docker secret holding the password, read from /run/secrets/<name>
                           (VCFOPS_SECRET_NAME)
-        A parameter wins over every variable; the password beats the file, which beats the secret.
+        -CredentialFile   the VCF installer credentials file (JSON); its VCF Operations entry gives the
+                          host, and its Administrator credentials the account and password
+                          (VCFOPS_CREDENTIAL_FILE). With several VCF Operations, -Fqdn picks one.
+        A parameter wins over every variable. Among parameters, and again among variables, a single
+        value (-Fqdn, -Username, -Password, -PasswordFile, -SecretName) beats the credentials file,
+        and the password beats the file, which beats the secret.
 
     import also takes:
         -AnonymisationKey key for stable IDs and pseudonyms, for runs that keep no state
@@ -146,6 +151,9 @@
 .PARAMETER SecretName
     A Docker secret holding the password (/run/secrets/<name>). VCFOPS_SECRET_NAME.
 
+.PARAMETER CredentialFile
+    The VCF installer credentials file: host, account and password for VCF Operations. VCFOPS_CREDENTIAL_FILE.
+
 .PARAMETER AnonymisationKey
     import: key for stable IDs and pseudonyms. VCFOPS_SYNTH_ANON_KEY.
 
@@ -163,6 +171,9 @@
 
 .EXAMPLE
     docker service create --secret vcfops_password -e VCFOPS_SECRET_NAME=vcfops_password ... ghcr.io/msherian/vcfops-synth backfill
+
+.EXAMPLE
+    pwsh ./bin/vcfops-synth.ps1 backfill -CredentialFile ~/Documents/vcf-installer-creds.json -ConfigPath ./config/lab.json
 
 .NOTES
     Exit codes: 0 success, 1 failure, 2 unknown command, parameter or value,
@@ -203,6 +214,7 @@ param(
     [object]$Password,
     [string]$PasswordFile,
     [string]$SecretName,
+    [string]$CredentialFile,
     [Alias('AnonKey')][string]$AnonymisationKey,
 
     [Parameter(ValueFromRemainingArguments)]
@@ -246,6 +258,7 @@ $optionSpec = [ordered]@{
     Password         = @{ Env = 'VCFOPS_PASSWORD'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
     PasswordFile     = @{ Env = 'VCFOPS_PASSWORD_FILE'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
     SecretName       = @{ Env = 'VCFOPS_SECRET_NAME'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
+    CredentialFile   = @{ Env = 'VCFOPS_CREDENTIAL_FILE'; Type = 'text'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
     AnonymisationKey = @{ Env = 'VCFOPS_SYNTH_ANON_KEY'; Type = 'module'; Commands = @('import') }
 }
 
@@ -315,16 +328,40 @@ function Get-CliOption {
     if ($options.ContainsKey($Name)) { $options[$Name] } else { $null }
 }
 
+function Get-CliCredential {
+    # The VCF installer credentials file (-CredentialFile, else VCFOPS_CREDENTIAL_FILE), read once.
+    $path = Get-CliOption 'CredentialFile'
+    if (-not $path) { return $null }
+    if (-not $script:cliCredential) {
+        # With several VCF Operations in the file, the host named elsewhere picks one.
+        $pick = Get-CliOption 'Fqdn'
+        if (-not $pick) { $pick = (Get-SynthConfig -Path $ConfigPath -SkipValidation).operations.fqdn }
+        $script:cliCredential = Read-SynthCredentialFile -Path $path -Fqdn $pick
+        $script:cliCredential.FromParameter = $cliBound.ContainsKey('CredentialFile')
+    }
+    $script:cliCredential
+}
+
 function Get-CliConfig {
-    # lab.json with the sign-in parameters given on the command line on top.
+    # lab.json with the sign-in parameters, then the credentials file, on top.
     param([switch]$SkipValidation)
-    Get-SynthConfig -Path $ConfigPath -Fqdn (Get-CliOption 'Fqdn') -Username (Get-CliOption 'Username') -AuthSource (Get-CliOption 'AuthSource') -SkipValidation:$SkipValidation
+    $fqdn = Get-CliOption 'Fqdn'
+    $username = Get-CliOption 'Username'
+    $cred = Get-CliCredential
+    # The file beats lab.json, and a single value beats the file when both are parameters or both variables.
+    if ($cred -and -not $fqdn -and ($cred.FromParameter -or -not $env:VCFOPS_FQDN)) { $fqdn = $cred.Fqdn }
+    if ($cred -and -not $username -and ($cred.FromParameter -or -not $env:VCFOPS_USERNAME)) { $username = $cred.Username }
+    Get-SynthConfig -Path $ConfigPath -Fqdn $fqdn -Username $username -AuthSource (Get-CliOption 'AuthSource') -SkipValidation:$SkipValidation
 }
 
 function Connect-Cli {
-    # Signs in with -Password, -PasswordFile or -SecretName when given, else the environment's.
+    # Signs in with -Password, -PasswordFile or -SecretName when given, else the credentials file or the environment's.
     param($Config)
-    $secret = Get-SynthSecret -Password (Get-CliOption 'Password') -PasswordFile (Get-CliOption 'PasswordFile') -SecretName (Get-CliOption 'SecretName')
+    $given = @('Password', 'PasswordFile', 'SecretName' | Where-Object { Get-CliOption $_ })
+    $cred = Get-CliCredential
+    $fromEnv = $env:VCFOPS_PASSWORD -or $env:VCFOPS_PASSWORD_FILE -or $env:VCFOPS_SECRET_NAME
+    $secret = if (-not $given.Count -and $cred -and ($cred.FromParameter -or -not $fromEnv)) { $cred.Password }
+    else { Get-SynthSecret -Password (Get-CliOption 'Password') -PasswordFile (Get-CliOption 'PasswordFile') -SecretName (Get-CliOption 'SecretName') }
     Connect-SynthOps -Config $Config -Password $secret
 }
 
@@ -363,6 +400,8 @@ try {
         exit 2
     }
     $commandName = $Command.ToLowerInvariant()
+    $cliBound = $PSBoundParameters
+    $script:cliCredential = $null
     try { $options = Resolve-CliOption -Name $commandName -Bound $PSBoundParameters }
     catch [System.ArgumentException] {
         Write-Host "$($_.Exception.Message) Run 'help' for usage."
