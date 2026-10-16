@@ -6,7 +6,7 @@ Everything ships as one Docker image, published to `ghcr.io/msherian/vcfops-synt
 
 ## Status
 
-Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history, on top of the Phase 2 importer and the Phase 1 image, CLI, Suite API sign-in and CI. The commands below marked "to come" stop with exit code 3 and name the phase that builds them.
+Phases 0 to 4 of 9 are done, and Phases 5 to 9 are under way. In the Holodeck 9.1 lab (VCF Operations 9.1.1), one customer estate is seeded and backfilled: 2,220 objects and 6,788 relationships under a vCenter adapter instance, with 30 days of 5-minute history for 1,644 of them. A check of 40 random VMs and all 89 hosts against their LiveOptics peaks and averages found that 95% of the series matched (1,765 of 1,855). Ops calculates Capacity and Time Remaining for the seeded objects. The commands below marked "to come" stop with exit code 3 and name the phase that builds them.
 
 | Command | What it does | Phase |
 |---|---|---|
@@ -16,7 +16,7 @@ Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history
 | `plan` | Dry run: what each stage would do | 1 |
 | `import` | RVTools export to inventory model | 2 |
 | `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
-| `reset` | Remove the objects seed created | to come (3) |
+| `reset` | Remove the objects seed created, found by tag and identifier | to come (8) |
 | `backfill` | Push generated history for every numeric metric | 4 |
 | `content` | Groups, policies, alerts, dashboards | to come (5 to 7) |
 | `feed`, `scenario` | Live metrics and scenario overlays | to come (6) |
@@ -57,7 +57,7 @@ The FQDN in `lab.example.json` is a placeholder in Holodeck's `site-a.vcf.lab` d
 | `operations.username` / `authSource` | `admin` / `LOCAL` | Account used for the Suite API |
 | `operations.skipCertificateCheck` | `false` | Set `true` for Holodeck's self-signed certificates |
 | `adapterKind.key` | `VcfOpsSynth` | Push adapter kind the synthetic objects live under |
-| `prefix` | `Synth-` | Prefix on everything created, so reset can find it |
+| `prefix` | `Synth-` | Prefix on the toolset's own content (groups, policies, dashboards), so reset can find it; seeded objects keep their names and are found by tag |
 | `timeZone` | `Europe/Dublin` | IANA zone for business-hours patterns |
 | `intervalMinutes` | `5` | Sample interval for history and the live feed |
 | `backfillDays` | `30` | Days of history to push |
@@ -133,7 +133,22 @@ Objects that already exist are found by their identifiers, not their names, and 
 
 `backfill` pushes `backfillDays` of history at `intervalMinutes` for every numeric metric of the seeded objects, with analytics processing off. Metrics LiveOptics measured (VM and host CPU, memory, IOPS, throughput, latency) match its average and peak exactly. The rest follow the object's workload curve around their current value, grow to it (space in use), stay flat (capacity, counts) or stay at zero (no source). Each VM's curve comes from its workload profile in `timeZone`, with seeded noise and incident windows; hosts, clusters, datastores, port groups and folders follow the sum of their VMs' curves, so peaks line up.
 
-Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. In the lab, 30 days for 1,709 objects is 2.4 billion samples, about 620,000 a second at concurrency 4, and about 6 bytes a sample in the Operations database.
+Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. In the lab, 30 days for the 1,227 VMs alone is 1.65 billion samples; at concurrency 6 they post at about 550,000 samples a second, roughly 50 minutes, and take about 6 bytes a sample in the Operations database.
+
+After a backfill, run `seed -Refresh`. History goes in with analytics processing off, so Operations calculates capacity and time remaining only once current stats arrive with analytics on.
+
+## Findings from the lab
+
+These hold for VCF Operations 9.1.1 in Holodeck 9.1 and shape how the toolset works.
+
+- **Native objects work.** Objects created under the vCenter adapter instance (`POST /api/resources/adapters/{id}`) are `VMWARE` objects: given every key of a real object's rubric, a VM matched a collected one exactly (657 metrics, 399 properties), got health and badges, and stayed linked through vCenter collection cycles. The one visible difference is the data source, which shows the VCF Operations API adapter.
+- **Never push what Operations computes.** Pushing capacity remaining, time remaining, badges, scores and similar keys, even as zero, stops Operations calculating them. `Test-SynthComputedStatKey` keeps them out of seed and backfill.
+- **A VM's disk write total is derived.** Operations adds up a VM's per-disk write rates and overwrites a pushed total, so the backfill puts LiveOptics throughput on the first disk and leaves the others at zero. Read totals are not derived.
+- **LiveOptics gives a peak and an average, not a time series.** History is generated to hit both exactly. A zero average with a real peak becomes a zero line with one spike; a peak equal to the average becomes a flat line.
+- **History is queued.** A 200 from the stats endpoint means accepted, not stored; 30 days read back after 10 to 20 minutes. Calls of 5 to 10 MB are fine.
+- **Standard switches have no native kind.** Standard vSwitches and their port groups go under the `adapterKind.key` push kind, the one part of the tree a real estate would not show. Two cluster and four host metrics are text and are pushed as text.
+- **Views and dashboards cannot be listed or deleted through the API**, so content is overwritten by name.
+- **Memory.** Verifying the whole estate ran out of memory on an 8 GB jump host; 32 GB is comfortable.
 
 ## Development
 
