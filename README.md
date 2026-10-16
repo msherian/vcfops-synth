@@ -18,7 +18,7 @@ Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history
 | `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
 | `reset` | Remove the objects seed created (and, with `-IncludeContent`, the toolset's content) | 8 |
 | `backfill` | Push generated history for every numeric metric | 4 |
-| `content` | Custom groups, symptoms, alerts and super metrics; policies and dashboards to come | 5 and 6 (7 to come) |
+| `content` | Custom groups, symptoms, alerts, super metrics, list views and reports; policies and dashboards to come | 5 to 7 |
 | `feed` | Live point every interval with analytics on, carrying on from the backfill | 6 |
 | `scenario` | Start, stop and list scenario overlays (S1 to S4, S8) | 6 |
 | `live-load` | Optional UPSA and load VMs | to come (9) |
@@ -104,6 +104,7 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-DryRun` | `VCFOPS_SYNTH_DRY_RUN` | seed, backfill, content, feed, reset | Report only; change nothing |
 | `-Force` | `VCFOPS_SYNTH_FORCE` | reset | Delete for real |
 | `-IncludeContent` | `VCFOPS_SYNTH_INCLUDE_CONTENT` | reset | Also delete the prefixed content |
+| `-ImportField` | `VCFOPS_SYNTH_IMPORT_FIELD` | content | Multipart field the content bundle is sent in; default `contentFile` |
 | `-Days` | `VCFOPS_SYNTH_DAYS` | backfill | Days of history; default `backfillDays` |
 | `-Kinds` | `VCFOPS_SYNTH_KINDS` | backfill | Comma-separated resource kinds |
 | `-MaxVms` | `VCFOPS_SYNTH_MAX_VMS` | backfill | First n VMs only, for a pilot |
@@ -178,6 +179,25 @@ pwsh ./bin/vcfops-synth.ps1 scenario -Stop all -ConfigPath ./config/lab.json
 | Datastore latency | S3 | | read or write above 30 ms |
 
 Each alert has a recommendation. The super metrics are VM CPU demand over allocation, the worst VM CPU ready and disk latency in each cluster, and the average VM health in each tier group; a policy must enable them before Operations computes them.
+
+### Views and reports
+
+`content` then builds a content bundle, `<paths.data>/content-bundle.zip`, and imports it with force, so a re-run overwrites the views and reports by name. The bundle follows the layout of a VCF Operations 9.1.1 content export (`configuration.json`, `usermappings.json`, the `<id>L.v1` owner file, `views.zip`, `reports.zip`), and the signed-in user owns it. Each view and report has a fixed id worked out from its name. With `-DryRun` the bundle is written but not imported.
+
+| View | Objects | Columns |
+|---|---|---|
+| VM tier list | VMs | Tier, application, cluster, vCPUs, memory, and over the last week CPU usage, CPU ready, memory usage, disk latency and CPU demand over allocation |
+| Oversized VMs | VMs Operations flags as oversized | Tier, cluster, size, and CPU and memory usage over 30 days |
+| Undersized VMs | VMs Operations flags as undersized | Tier, cluster, size, and peak CPU, ready and memory over 30 days |
+| VM configuration hygiene | VMs | Tier, VMware Tools running and version, hardware version, guest OS, snapshot space |
+| Cluster tier pressure | Clusters | CPU and memory usage over the last week, worst VM CPU ready and disk latency, capacity and time remaining |
+
+| Report | Views |
+|---|---|
+| Weekly tier compliance | VM tier list, Cluster tier pressure |
+| Rightsizing | Oversized VMs, Undersized VMs |
+
+Reports open with a cover page and come as PDF and CSV. Super metric columns appear once the super metrics exist, since a view refers to a super metric by id. Dashboards follow in a later part of Phase 7.
 
 ## Reset
 
