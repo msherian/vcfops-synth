@@ -88,6 +88,16 @@ Describe 'vcfops-synth CLI' {
         $result.Output | Should -Match '^vcfops-synth \d+\.\d+\.\d+'
     }
 
+    It 'takes the sign-in settings as parameters, and keeps the password out of commands that do not sign in' {
+        $result = Invoke-Cli @('config', '-Fqdn', 'ops-param.example.test', '-ConfigPath', $script:example) -Environment @{ VCFOPS_FQDN = 'ops-env.example.test' }
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -BeLike '*ops-param.example.test*'
+        $result.Output | Should -Not -BeLike '*ops-env.example.test*'
+        $result = Invoke-Cli @('config', '-SecretName', 'vcfops_password', '-ConfigPath', $script:example)
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike "*'config' does not take -SecretName*"
+    }
+
     It 'ignores variables meant for other commands' {
         $result = Invoke-Cli @('config', '-ConfigPath', $script:example) -Environment @{ VCFOPS_SYNTH_ADAPTER = 'vc-01'; VCFOPS_SYNTH_DAYS = 'not a number' }
         $result.ExitCode | Should -Be 0
@@ -163,6 +173,15 @@ Describe 'vcfops-synth CLI' {
             $result = Invoke-Cli @('import', '-Frobnicate', '-ConfigPath', $script:lab)
             $result.ExitCode | Should -Be 2
             $result.Output | Should -BeLike "*Unexpected argument(s) for 'import': -Frobnicate*"
+        }
+
+        It 'takes the anonymisation key as -AnonymisationKey, the same as VCFOPS_SYNTH_ANON_KEY' {
+            $byParam = Join-Path $TestDrive 'key-param.json'
+            $byEnv = Join-Path $TestDrive 'key-env.json'
+            (Invoke-Cli @('import', $script:fixture, '-AnonymisationKey', 'k-1', '-Output', $byParam, '-ConfigPath', $script:lab)).ExitCode | Should -Be 0
+            (Invoke-Cli @('import', $script:fixture, '-Output', $byEnv, '-ConfigPath', $script:lab) -Environment @{ VCFOPS_SYNTH_ANON_KEY = 'k-1' }).ExitCode | Should -Be 0
+            $ids = { param($f) ((Get-Content $f -Raw | ConvertFrom-Json).vms | ForEach-Object id | Sort-Object) -join ',' }
+            & $ids $byParam | Should -Be (& $ids $byEnv)
         }
 
         It 'reads its paths from VCFOPS_SYNTH_* variables, and a parameter wins over its variable' {

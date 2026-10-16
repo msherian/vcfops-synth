@@ -1,6 +1,7 @@
 # Pester 5 tests for configuration loading and validation. No lab needed.
 #   Invoke-Pester -Path ./tests
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Test helper that writes into the Pester TestDrive.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'Test fixture passwords, not secrets.')]
 param()
 
 BeforeAll {
@@ -57,6 +58,19 @@ Describe 'Get-SynthConfig' {
         { Get-SynthConfig -Path $path } | Should -Throw '*not valid JSON*'
     }
 
+    It 'lets -Fqdn, -Username and -AuthSource win over the file and the variables' {
+        $path = New-LabFile @{ operations = @{ fqdn = 'from-file.example.test' } }
+        $env:VCFOPS_FQDN = 'from-env.example.test'
+        try {
+            $config = Get-SynthConfig -Path $path -Fqdn 'from-param.example.test' -Username 'svc-synth' -AuthSource 'vIDMAuthSource'
+            $config.operations.fqdn | Should -Be 'from-param.example.test'
+            $config.operations.username | Should -Be 'svc-synth'
+            $config.operations.authSource | Should -Be 'vIDMAuthSource'
+            (Get-SynthConfig -Path $path).operations.fqdn | Should -Be 'from-env.example.test'
+        }
+        finally { Remove-Item Env:VCFOPS_FQDN -ErrorAction SilentlyContinue }
+    }
+
     It 'refuses an invalid file unless validation is skipped' {
         $path = New-LabFile @{ operations = @{ fqdn = '' } }
         { Get-SynthConfig -Path $path } | Should -Throw '*operations.fqdn is empty*'
@@ -92,10 +106,39 @@ Describe 'Test-SynthConfig' {
 
 Describe 'Get-SynthSecret' {
     BeforeEach {
-        Remove-Item Env:VCFOPS_PASSWORD, Env:VCFOPS_PASSWORD_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:VCFOPS_PASSWORD, Env:VCFOPS_PASSWORD_FILE, Env:VCFOPS_SECRET_NAME -ErrorAction SilentlyContinue
     }
     AfterAll {
-        Remove-Item Env:VCFOPS_PASSWORD, Env:VCFOPS_PASSWORD_FILE -ErrorAction SilentlyContinue
+        Remove-Item Env:VCFOPS_PASSWORD, Env:VCFOPS_PASSWORD_FILE, Env:VCFOPS_SECRET_NAME -ErrorAction SilentlyContinue
+    }
+
+    It 'reads a Docker secret by name from the secrets folder' {
+        Set-Content -Path (Join-Path $TestDrive 'vcfops_password') -Value 'from-secret'
+        $env:VCFOPS_SECRET_NAME = 'vcfops_password'
+        InModuleScope VcfOpsSynth -Parameters @{ Folder = $TestDrive } { param($Folder) ConvertFrom-SecureString (Get-SynthSecret -SecretsPath $Folder) -AsPlainText } | Should -Be 'from-secret'
+        InModuleScope VcfOpsSynth -Parameters @{ Folder = $TestDrive } { param($Folder) ConvertFrom-SecureString (Get-SynthSecret -SecretName 'vcfops_password' -SecretsPath $Folder) -AsPlainText } | Should -Be 'from-secret'
+    }
+
+    It 'refuses a secret name that is a path' {
+        { InModuleScope VcfOpsSynth { Get-SynthSecret -SecretName '../etc/passwd' } } | Should -Throw '*must be a secret name, not a path*'
+    }
+
+    It 'lets any parameter win over every variable' {
+        $env:VCFOPS_PASSWORD = 'from-env'
+        $file = Join-Path $TestDrive 'pw.txt'
+        Set-Content -Path $file -Value 'from-param-file'
+        InModuleScope VcfOpsSynth -Parameters @{ File = $file } { param($File) ConvertFrom-SecureString (Get-SynthSecret -PasswordFile $File) -AsPlainText } | Should -Be 'from-param-file'
+        InModuleScope VcfOpsSynth { ConvertFrom-SecureString (Get-SynthSecret -Password 'from-param') -AsPlainText } | Should -Be 'from-param'
+        $secure = ConvertTo-SecureString 'secure-param' -AsPlainText -Force
+        InModuleScope VcfOpsSynth -Parameters @{ S = $secure } { param($S) ConvertFrom-SecureString (Get-SynthSecret -Password $S) -AsPlainText } | Should -Be 'secure-param'
+    }
+
+    It 'takes the password before the file before the secret' {
+        $file = Join-Path $TestDrive 'pw2.txt'
+        Set-Content -Path $file -Value 'from-file'
+        $env:VCFOPS_PASSWORD_FILE = $file
+        $env:VCFOPS_SECRET_NAME = 'absent'
+        InModuleScope VcfOpsSynth { ConvertFrom-SecureString (Get-SynthSecret) -AsPlainText } | Should -Be 'from-file'
     }
 
     It 'prefers VCFOPS_PASSWORD' {

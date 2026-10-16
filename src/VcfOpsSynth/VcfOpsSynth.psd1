@@ -10,6 +10,7 @@
         'Test-SynthConfig'
         'Connect-SynthOps'
         'Disconnect-SynthOps'
+        'Get-SynthSecret'
         'Invoke-SynthOpsRequest'
         'Get-SynthOpsVersion'
         'Get-SynthTieringRule'

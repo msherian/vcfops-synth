@@ -34,15 +34,26 @@ function Get-SynthAnonymisationKey {
         Returns the key that makes object IDs and pseudonyms stable across imports.
 
     .DESCRIPTION
-        VCFOPS_SYNTH_ANON_KEY wins, for runs that keep no state. Otherwise the key
-        lives in anonymise.key in the data folder, created with 32 random bytes the
-        first time. Keep that file to keep the same pseudonyms on re-import; delete
-        it to issue new ones (objects already seeded will then no longer match).
+        -Key, then VCFOPS_SYNTH_ANON_KEY, win, for runs that keep no state. Otherwise
+        the key lives in anonymise.key in the data folder, created with 32 random
+        bytes the first time. Keep that file to keep the same pseudonyms on
+        re-import; delete it to issue new ones (objects already seeded will then no
+        longer match).
+
+    .PARAMETER DataPath
+        The data folder that holds anonymise.key.
+
+    .PARAMETER Key
+        The key as text, overriding VCFOPS_SYNTH_ANON_KEY and the file.
     #>
     [CmdletBinding()]
     [OutputType([byte[]])]
-    param([Parameter(Mandatory)][string]$DataPath)
+    param(
+        [Parameter(Mandatory)][string]$DataPath,
+        [string]$Key
+    )
 
+    if ($Key) { return [System.Text.Encoding]::UTF8.GetBytes($Key) }
     if ($env:VCFOPS_SYNTH_ANON_KEY) {
         return [System.Text.Encoding]::UTF8.GetBytes($env:VCFOPS_SYNTH_ANON_KEY)
     }

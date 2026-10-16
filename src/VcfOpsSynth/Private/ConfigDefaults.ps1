@@ -87,25 +87,56 @@ function Get-SynthSecret {
         Reads the Operations password from the environment or a secret file.
 
     .DESCRIPTION
-        VCFOPS_PASSWORD wins. Otherwise VCFOPS_PASSWORD_FILE names a file to read,
-        which is how a Docker secret is mounted (/run/secrets/<name>). Returns $null
-        when neither is set, so callers decide whether a password is needed.
+        Three ways to give it, each as a parameter or an environment variable:
+        the password itself (-Password, VCFOPS_PASSWORD), a file holding it
+        (-PasswordFile, VCFOPS_PASSWORD_FILE), or the name of a Docker secret,
+        read from <SecretsPath>/<name>, /run/secrets by default (-SecretName,
+        VCFOPS_SECRET_NAME). Any parameter wins over every variable; within each,
+        the password beats the file, which beats the secret. Returns $null when
+        none is set, so callers decide whether a password is needed.
+
+    .PARAMETER Password
+        The password, as a SecureString or as text.
+
+    .PARAMETER PasswordFile
+        A file holding the password.
+
+    .PARAMETER SecretName
+        A Docker secret holding the password.
+
+    .PARAMETER SecretsPath
+        Where Docker mounts secrets.
     #>
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The password arrives as plain text from an environment variable or Docker secret file; this is where it becomes a SecureString.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'The password arrives as plain text from a parameter, an environment variable or a secret file; this is where it becomes a SecureString.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'PasswordFile', Justification = 'A path to the password, not the password.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'Password', Justification = 'Takes a SecureString, or text from pwsh -File or an environment variable, and returns a SecureString.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'SecretsPath', Justification = 'Used inside the fromSecret script block, which the rule does not follow.')]
     [CmdletBinding()]
     [OutputType([securestring])]
-    param()
+    param(
+        [object]$Password,
+        [string]$PasswordFile,
+        [string]$SecretName,
+        [string]$SecretsPath = '/run/secrets'
+    )
 
-    if ($env:VCFOPS_PASSWORD) {
-        return ConvertTo-SecureString -String $env:VCFOPS_PASSWORD -AsPlainText -Force
+    $readFile = {
+        param($File, $From)
+        if (-not (Test-Path -LiteralPath $File)) { throw "$From points at '$File', which does not exist." }
+        ConvertTo-SecureString -String ((Get-Content -LiteralPath $File -Raw).TrimEnd("`r", "`n")) -AsPlainText -Force
     }
-    if ($env:VCFOPS_PASSWORD_FILE) {
-        if (-not (Test-Path -LiteralPath $env:VCFOPS_PASSWORD_FILE)) {
-            throw "VCFOPS_PASSWORD_FILE points at '$($env:VCFOPS_PASSWORD_FILE)', which does not exist."
-        }
-        $text = (Get-Content -LiteralPath $env:VCFOPS_PASSWORD_FILE -Raw).TrimEnd("`r", "`n")
-        return ConvertTo-SecureString -String $text -AsPlainText -Force
+    $fromSecret = {
+        param($Name, $From)
+        if ($Name -match '[\\/]' -or $Name -match '^\.\.?$') { throw "$From must be a secret name, not a path; got '$Name'." }
+        & $readFile (Join-Path $SecretsPath $Name) $From
     }
+    if ($Password -is [securestring]) { return $Password }
+    if ($Password) { return ConvertTo-SecureString -String ([string]$Password) -AsPlainText -Force }
+    if ($PasswordFile) { return & $readFile $PasswordFile '-PasswordFile' }
+    if ($SecretName) { return & $fromSecret $SecretName '-SecretName' }
+    if ($env:VCFOPS_PASSWORD) { return ConvertTo-SecureString -String $env:VCFOPS_PASSWORD -AsPlainText -Force }
+    if ($env:VCFOPS_PASSWORD_FILE) { return & $readFile $env:VCFOPS_PASSWORD_FILE 'VCFOPS_PASSWORD_FILE' }
+    if ($env:VCFOPS_SECRET_NAME) { return & $fromSecret $env:VCFOPS_SECRET_NAME 'VCFOPS_SECRET_NAME' }
     $null
 }
 

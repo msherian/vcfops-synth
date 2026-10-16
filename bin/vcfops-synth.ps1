@@ -60,8 +60,22 @@
     Every command:
         -Command          the command (VCFOPS_SYNTH_COMMAND; default help)
         -ConfigPath       lab.json (VCFOPS_SYNTH_CONFIG; default /config/lab.json)
-        Sign-in also reads VCFOPS_FQDN, VCFOPS_USERNAME, VCFOPS_AUTHSOURCE, and the password from
-        VCFOPS_PASSWORD or VCFOPS_PASSWORD_FILE.
+
+    Signing in to VCF Operations (config, connect-test, plan, seed, backfill; the password only for
+    connect-test, seed and backfill):
+        -Fqdn             VCF Operations host name (VCFOPS_FQDN; default operations.fqdn)
+        -Username         account (VCFOPS_USERNAME; default operations.username)
+        -AuthSource       authentication source (VCFOPS_AUTHSOURCE; default operations.authSource)
+        -Password         the password (VCFOPS_PASSWORD). On a command line it shows in process lists
+                          and shell history; prefer one of the two below.
+        -PasswordFile     a file holding the password (VCFOPS_PASSWORD_FILE)
+        -SecretName       a Docker secret holding the password, read from /run/secrets/<name>
+                          (VCFOPS_SECRET_NAME)
+        A parameter wins over every variable; the password beats the file, which beats the secret.
+
+    import also takes:
+        -AnonymisationKey key for stable IDs and pseudonyms, for runs that keep no state
+                          (VCFOPS_SYNTH_ANON_KEY; default <paths.data>/anonymise.key)
 
     Commands still to come, by build phase:
         reset             Phase 3   Remove the objects seed created
@@ -114,6 +128,27 @@
 .PARAMETER Restart
     backfill: forget saved progress. VCFOPS_SYNTH_RESTART.
 
+.PARAMETER Fqdn
+    VCF Operations host name. VCFOPS_FQDN.
+
+.PARAMETER Username
+    Account to sign in with. VCFOPS_USERNAME.
+
+.PARAMETER AuthSource
+    Authentication source. VCFOPS_AUTHSOURCE.
+
+.PARAMETER Password
+    The password, as text or a SecureString. VCFOPS_PASSWORD. Prefer -PasswordFile or -SecretName.
+
+.PARAMETER PasswordFile
+    A file holding the password. VCFOPS_PASSWORD_FILE.
+
+.PARAMETER SecretName
+    A Docker secret holding the password (/run/secrets/<name>). VCFOPS_SECRET_NAME.
+
+.PARAMETER AnonymisationKey
+    import: key for stable IDs and pseudonyms. VCFOPS_SYNTH_ANON_KEY.
+
 .PARAMETER Unrecognised
     Anything else on the command line; refused with exit code 2.
 
@@ -126,11 +161,15 @@
 .EXAMPLE
     docker run --rm -v ./config:/config -v ./data:/data -e VCFOPS_PASSWORD -e VCFOPS_SYNTH_DRY_RUN=true ghcr.io/msherian/vcfops-synth seed
 
+.EXAMPLE
+    docker service create --secret vcfops_password -e VCFOPS_SECRET_NAME=vcfops_password ... ghcr.io/msherian/vcfops-synth backfill
+
 .NOTES
     Exit codes: 0 success, 1 failure, 2 unknown command, parameter or value,
     3 command not built yet.
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Parameters are read through PSBoundParameters by Resolve-CliOption.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '', Justification = 'pwsh -File passes text; Get-SynthSecret turns it into a SecureString at once, and the help steers to -PasswordFile and -SecretName.')]
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
@@ -156,6 +195,15 @@ param(
     [string]$MaxVms,
     [string]$Concurrency,
     [switch]$Restart,
+
+    [string]$Fqdn,
+    [string]$Username,
+    [string]$AuthSource,
+    # Text from pwsh -File, or a SecureString when the script is called from PowerShell.
+    [object]$Password,
+    [string]$PasswordFile,
+    [string]$SecretName,
+    [Alias('AnonKey')][string]$AnonymisationKey,
 
     [Parameter(ValueFromRemainingArguments)]
     [string[]]$Unrecognised
@@ -191,6 +239,14 @@ $optionSpec = [ordered]@{
     MaxVms      = @{ Env = 'VCFOPS_SYNTH_MAX_VMS'; Type = 'count'; Commands = @('backfill') }
     Concurrency = @{ Env = 'VCFOPS_SYNTH_CONCURRENCY'; Type = 'count'; Commands = @('backfill') }
     Restart     = @{ Env = 'VCFOPS_SYNTH_RESTART'; Type = 'switch'; Commands = @('backfill') }
+    # The module reads these variables itself, so only a parameter is passed on ('module').
+    Fqdn             = @{ Env = 'VCFOPS_FQDN'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
+    Username         = @{ Env = 'VCFOPS_USERNAME'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
+    AuthSource       = @{ Env = 'VCFOPS_AUTHSOURCE'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
+    Password         = @{ Env = 'VCFOPS_PASSWORD'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
+    PasswordFile     = @{ Env = 'VCFOPS_PASSWORD_FILE'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
+    SecretName       = @{ Env = 'VCFOPS_SECRET_NAME'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
+    AnonymisationKey = @{ Env = 'VCFOPS_SYNTH_ANON_KEY'; Type = 'module'; Commands = @('import') }
 }
 
 function Show-Help {
@@ -229,6 +285,7 @@ function Resolve-CliOption {
             throw [System.ArgumentException]::new("'$Name' does not take -$key.")
         }
         if (-not $takes) { continue }
+        if ($spec.Type -eq 'module') { $options[$key] = if ($Bound.ContainsKey($key)) { $Bound[$key] } else { $null }; continue }
         $raw = $null
         $from = ''
         if ($Bound.ContainsKey($key)) { $raw = $Bound[$key]; $from = "-$key" }
@@ -250,6 +307,25 @@ function Resolve-CliOption {
         }
     }
     $options
+}
+
+function Get-CliOption {
+    # An option of the current command, or $null when the command does not take it.
+    param([string]$Name)
+    if ($options.ContainsKey($Name)) { $options[$Name] } else { $null }
+}
+
+function Get-CliConfig {
+    # lab.json with the sign-in parameters given on the command line on top.
+    param([switch]$SkipValidation)
+    Get-SynthConfig -Path $ConfigPath -Fqdn (Get-CliOption 'Fqdn') -Username (Get-CliOption 'Username') -AuthSource (Get-CliOption 'AuthSource') -SkipValidation:$SkipValidation
+}
+
+function Connect-Cli {
+    # Signs in with -Password, -PasswordFile or -SecretName when given, else the environment's.
+    param($Config)
+    $secret = Get-SynthSecret -Password (Get-CliOption 'Password') -PasswordFile (Get-CliOption 'PasswordFile') -SecretName (Get-CliOption 'SecretName')
+    Connect-SynthOps -Config $Config -Password $secret
 }
 
 function New-CliSeedPlan {
@@ -295,7 +371,7 @@ try {
         }
 
         'config' {
-            $config = Get-SynthConfig -Path $ConfigPath -SkipValidation
+            $config = Get-CliConfig -SkipValidation
             ConvertTo-RedactedConfig -Config $config | ConvertTo-Json -Depth 10 | Write-Host
             $problems = @(Test-SynthConfig -Config $config)
             if ($problems.Count -gt 0) {
@@ -310,8 +386,8 @@ try {
         }
 
         'connect-test' {
-            $config = Get-SynthConfig -Path $ConfigPath
-            $session = Connect-SynthOps -Config $config
+            $config = Get-CliConfig
+            $session = Connect-Cli -Config $config
             $version = Get-SynthOpsVersion
             $release = if ($version.PSObject.Properties['releaseName']) { $version.releaseName } else { $version | ConvertTo-Json -Compress }
             Write-Host "Signed in to $($config.operations.fqdn) as $($config.operations.username)."
@@ -322,7 +398,7 @@ try {
         }
 
         'plan' {
-            $config = Get-SynthConfig -Path $ConfigPath
+            $config = Get-CliConfig
             $samplesPerObject = [int]($config.backfillDays * 24 * 60 / $config.intervalMinutes)
             Write-Host "Target:      https://$($config.operations.fqdn) as $($config.operations.username) ($($config.operations.authSource))"
             Write-Host "Adapter:     $($config.adapterKind.key) ('$($config.adapterKind.name)'), objects prefixed '$($config.prefix)'"
@@ -344,7 +420,7 @@ try {
         }
 
         'import' {
-            $config = Get-SynthConfig -Path $ConfigPath
+            $config = Get-CliConfig
             $source = if ($options.Source) { $options.Source } else { $config.import.source }
             $output = if ($options.Output) { $options.Output } else { $config.paths.inventory }
             $anonymise = if ($null -ne $options.NoAnonymise) { -not $options.NoAnonymise } else { $config.import.anonymise }
@@ -361,7 +437,7 @@ try {
             $perfPath = if ($options.Performance) { $options.Performance } else { $config.import.performance }
             $perfData = if ($perfPath) { Read-SynthLiveOptics -Path $perfPath } else { $null }
 
-            $key = Get-SynthAnonymisationKey -DataPath $config.paths.data
+            $key = Get-SynthAnonymisationKey -DataPath $config.paths.data -Key (Get-CliOption 'AnonymisationKey')
             $inventory = Import-SynthRvtools -Path $source -Key $key -TieringRules $rules -Anonymise:$anonymise -Performance $perfData
             Save-SynthInventory -Inventory $inventory -Path $output
 
@@ -378,14 +454,14 @@ try {
         }
 
         'seed' {
-            $config = Get-SynthConfig -Path $ConfigPath
+            $config = Get-CliConfig
             $adapterName = if ($options.Adapter) { $options.Adapter } else { $config.seed.adapterInstance }
             if (-not $adapterName) { throw 'No vCenter adapter instance to seed under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
             $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
             $inventory = Get-SynthInventory -Path $config.paths.inventory
             $rubrics = Get-SynthRubric -Path $rubricPath
 
-            $null = Connect-SynthOps -Config $config
+            $null = Connect-Cli -Config $config
             try {
                 $target = Resolve-SynthSeedTarget -Name $adapterName
                 $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target
@@ -420,7 +496,7 @@ try {
         }
 
         'backfill' {
-            $config = Get-SynthConfig -Path $ConfigPath
+            $config = Get-CliConfig
             $adapterName = if ($options.Adapter) { $options.Adapter } else { $config.seed.adapterInstance }
             if (-not $adapterName) { throw 'No vCenter adapter instance to backfill under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
             $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
@@ -429,7 +505,7 @@ try {
             $days = if ($options.Days) { $options.Days } else { $config.backfillDays }
             $range = Get-SynthBackfillRange -Days $days -IntervalMinutes $config.intervalMinutes
 
-            $null = Connect-SynthOps -Config $config
+            $null = Connect-Cli -Config $config
             try {
                 $target = Resolve-SynthSeedTarget -Name $adapterName
                 $plan = (New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target).Plan
