@@ -1,0 +1,577 @@
+{
+  "entries": [],
+  "dashboards": [
+    {
+      "shared": false,
+      "namePath": "vRealize Operations",
+      "hidden": true,
+      "creationTime": 1791900962505,
+      "autoswitchEnabled": false,
+      "importAttempts": 0,
+      "lastUpdateUserId": "{{OWNER_ID}}",
+      "columnProportion": "0.5-0.5",
+      "importComplete": true,
+      "columnCount": 2,
+      "widgets": [
+        {
+          "tabId": "6a56ac8e-7d2d-481e-9407-5af3c4248bde",
+          "collapsed": false,
+          "id": "d9042980-62bc-4e02-bec2-22b4b0f5eb76",
+          "gridsterCoords": {
+            "w": 6,
+            "x": 1,
+            "h": 5,
+            "y": 8
+          },
+          "state": "",
+          "type": "Heatmap",
+          "title": "Cluster Health Heatmap",
+          "config": {
+            "configs": [
+              {
+                "mode": {
+                  "mode": false
+                },
+                "resourceKind": "resourceKind:id:64_::_",
+                "tagFilter": null,
+                "colorBy": {
+                  "metricKey": "badge|health",
+                  "value": "Badge|Health"
+                },
+                "color": {
+                  "middleColor": "FFFF00",
+                  "minValue": "0",
+                  "endColor": "008000",
+                  "maxValue": "100",
+                  "startColor": "FF0000"
+                },
+                "sizeBy": {
+                  "value": ""
+                },
+                "relationalGrouping": false,
+                "name": "Cluster Health Heatmap",
+                "groupBy": {
+                  "qshowDelay": 0,
+                  "expandable": true,
+                  "isLast": false,
+                  "icon": "",
+                  "type": "resourceKind",
+                  "loaded": false,
+                  "isFirst": false,
+                  "expanded": false,
+                  "children": null,
+                  "root": false,
+                  "checked": null,
+                  "hrefTarget": "",
+                  "href": "",
+                  "id": "004null002026vCenter Operations AdaptervC-Ops-Cluster",
+                  "text": "vC Ops Cluster",
+                  "iconCls": "x-tree-noicon",
+                  "parentText": "vC Ops adapter",
+                  "qtitle": "",
+                  "index": 12,
+                  "cls": "",
+                  "leaf": true,
+                  "loading": false,
+                  "parentId": "vCenter Operations Adapter",
+                  "originalText": "",
+                  "depth": 2,
+                  "allowDrag": true,
+                  "typeId": "resourceKind:id:63_::_",
+                  "allowDrop": true,
+                  "qtip": ""
+                },
+                "attributeKind": {
+                  "value": ""
+                },
+                "thenBy": null
+              }
+            ],
+            "refreshInterval": 30,
+            "refreshContent": {
+              "refreshContent": false
+            },
+            "title": "Cluster Health Heatmap",
+            "value": 0
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "b%3A0",
+              "key": "perm_toolbarVisible_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_d9042980-62bc-4e02-bec2-22b4b0f5eb76"
+            },
+            {
+              "value": "o%3A",
+              "key": "perm_HeatMap_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_d9042980-62bc-4e02-bec2-22b4b0f5eb76"
+            }
+          ]
+        },
+        {
+          "tabId": "6a56ac8e-7d2d-481e-9407-5af3c4248bde",
+          "collapsed": false,
+          "id": "e8127196-6ba7-4f9e-8327-8a57fb74befc",
+          "gridsterCoords": {
+            "w": 6,
+            "x": 7,
+            "h": 15,
+            "y": 8
+          },
+          "state": "",
+          "type": "Skittles",
+          "title": "Environment Overview",
+          "config": {
+            "mode": "custom",
+            "badge": [
+              {
+                "badgeKey": "health",
+                "badgeName": "Health",
+                "show": true,
+                "label": null
+              },
+              {
+                "badgeKey": "risk",
+                "badgeName": "Risk",
+                "show": true,
+                "label": null
+              },
+              {
+                "badgeKey": "efficiency",
+                "badgeName": "Efficiency",
+                "show": true,
+                "label": null
+              }
+            ],
+            "refreshInterval": 300,
+            "custom": [],
+            "refreshContent": {
+              "refreshContent": false
+            },
+            "selfProvider": {
+              "selfProvider": false
+            },
+            "title": "Environment Overview"
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "o%3A",
+              "key": "permSkittlesView_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_e8127196-6ba7-4f9e-8327-8a57fb74befc"
+            }
+          ]
+        },
+        {
+          "tabId": "6a56ac8e-7d2d-481e-9407-5af3c4248bde",
+          "collapsed": false,
+          "id": "f1d90dd9-9ce0-49b7-b617-a1a33cc37df6",
+          "gridsterCoords": {
+            "w": 6,
+            "x": 1,
+            "h": 5,
+            "y": 13
+          },
+          "state": "",
+          "type": "ProblemAlertsList",
+          "title": "Top Issues",
+          "config": {
+            "impactedBadge": "health",
+            "topIssuesDisplayLimit": 5,
+            "refreshInterval": 60,
+            "resource": {
+              "resourceId": "resource:id:6_::_",
+              "resourceName": "vC Ops Cluster-evn-ldu1"
+            },
+            "refreshContent": {
+              "refreshContent": true
+            },
+            "selfProvider": {
+              "selfProvider": false
+            },
+            "title": "Top Issues",
+            "triggeredObject": {
+              "triggeredObject": "self"
+            }
+          },
+          "height": 0
+        },
+        {
+          "tabId": "6a56ac8e-7d2d-481e-9407-5af3c4248bde",
+          "collapsed": false,
+          "id": "ad9603f0-0cb6-4292-98e0-9cc4afc5b41c",
+          "gridsterCoords": {
+            "w": 6,
+            "x": 1,
+            "h": 5,
+            "y": 18
+          },
+          "state": "",
+          "type": "HealthChart",
+          "title": "Health Chart",
+          "config": {
+            "metricName": "",
+            "refreshInterval": 300,
+            "refreshContent": {
+              "refreshContent": false
+            },
+            "sortByDir": {
+              "orderByDir": "asc"
+            },
+            "title": "Health Chart",
+            "showResourceName": {
+              "showResourceName": true
+            },
+            "chartHeight": 115,
+            "metricUnit": {
+              "metricUnitId": null,
+              "metricUnitName": ""
+            },
+            "mode": "self",
+            "metricType": {
+              "metricType": "health"
+            },
+            "tagFilter": null,
+            "paginationNumber": 15,
+            "showMetricLabel": {
+              "showMetricLabel": false
+            },
+            "metricLabel": "",
+            "selectFirstRow": {
+              "selectFirstRow": false
+            },
+            "sortBy": "metricValue",
+            "selfProvider": {
+              "selfProvider": false
+            }
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "s%3A%7B%22dateRange%22%3A%22last6Hour%22%2C%22dateFrom%22%3Anull%2C%22dateTo%22%3Anull%2C%22timeFrom%22%3Anull%2C%22timeTo%22%3Anull%7D",
+              "key": "permDateRange_HealthChart_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_ad9603f0-0cb6-4292-98e0-9cc4afc5b41c"
+            }
+          ]
+        },
+        {
+          "tabId": "6a56ac8e-7d2d-481e-9407-5af3c4248bde",
+          "collapsed": false,
+          "id": "742c0b0d-971d-425d-a0a3-4436e89b038c",
+          "gridsterCoords": {
+            "w": 12,
+            "x": 1,
+            "h": 7,
+            "y": 1
+          },
+          "state": "",
+          "type": "AlertList",
+          "title": "Alert List",
+          "config": {
+            "alertImpact": [],
+            "mode": "tagFilter",
+            "tagFilter": {
+              "path": [
+                "/source/adapterKind/adapterKind:adapterKind:id:1_::_"
+              ],
+              "value": {
+                "bus": [],
+                "adapterKind": [
+                  "adapterKind:id:1_::_"
+                ],
+                "kind": [],
+                "exclaim": false,
+                "healthRange": [],
+                "maintenanceSchedule": [],
+                "adapterInstance": [],
+                "collector": [],
+                "tier": [],
+                "state": [],
+                "tag": [],
+                "day": [],
+                "status": []
+              }
+            },
+            "alertAction": [],
+            "refreshInterval": 300,
+            "refreshContent": {
+              "refreshContent": false
+            },
+            "criticalityLevel": [
+              2,
+              3,
+              4
+            ],
+            "state": [],
+            "title": "Alert List",
+            "type": [],
+            "status": [
+              0
+            ]
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "s%3A%7B%22dateRange%22%3A%22last30Days%22%2C%22dateFrom%22%3Anull%2C%22dateTo%22%3Anull%2C%22timeFrom%22%3Anull%2C%22timeTo%22%3Anull%7D",
+              "key": "permDateFilter_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_742c0b0d-971d-425d-a0a3-4436e89b038c"
+            },
+            {
+              "value": "o%3Acolumns%3Da%253Ao%25253Aid%25253Ds%2525253Ah16%255Eo%25253Aid%25253Ds%2525253Ah1%25255Ehidden%25253Db%2525253A1%25255Ewidth%25253Dn%2525253A100%255Eo%25253Aid%25253Ds%2525253Ah2%255Eo%25253Aid%25253Ds%2525253Ah3%255Eo%25253Aid%25253Ds%2525253Ah4%255Eo%25253Aid%25253Ds%2525253Ah5%255Eo%25253Aid%25253Ds%2525253Ah6%255Eo%25253Aid%25253Ds%2525253Ah7%25255Ehidden%25253Db%2525253A1%255Eo%25253Aid%25253Ds%2525253Ah8%25255Ehidden%25253Db%2525253A1%255Eo%25253Aid%25253Ds%2525253Ah9%25255Ehidden%25253Db%2525253A1%255Eo%25253Aid%25253Ds%2525253Ah10%25255Ehidden%25253Db%2525253A1%255Eo%25253Aid%25253Ds%2525253Ah11%255Eo%25253Aid%25253Ds%2525253Ah12%255Eo%25253Aid%25253Ds%2525253Ah13%25255Ehidden%25253Db%2525253A1%255Eo%25253Aid%25253Ds%2525253Ah14%25255Ehidden%25253Db%2525253A1%255Eo%25253Aid%25253Ds%2525253Ah15%25255Ehidden%25253Db%2525253A0%5EstoreState%3Do%253Asorters%253Da%25253Ao%2525253Aroot%2525253Ds%252525253Adata%2525255Eproperty%2525253Ds%252525253AalertLevel%2525255Edirection%2525253Ds%252525253ADESC%2525255Eid%2525253Ds%252525253AalertLevel",
+              "key": "permAlertGrid_perm_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_742c0b0d-971d-425d-a0a3-4436e89b038c"
+            },
+            {
+              "value": "s%3ADEFINITION",
+              "key": "permViewMode_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_742c0b0d-971d-425d-a0a3-4436e89b038c"
+            },
+            {
+              "value": "b%3A0",
+              "key": "perm_toolbarVisible_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_742c0b0d-971d-425d-a0a3-4436e89b038c"
+            }
+          ]
+        },
+        {
+          "tabId": "6a56ac8e-7d2d-481e-9407-5af3c4248bde",
+          "collapsed": false,
+          "id": "a4d5f265-6977-4205-a878-82d7976eddcf",
+          "gridsterCoords": {
+            "w": 12,
+            "x": 1,
+            "h": 8,
+            "y": 31
+          },
+          "state": "",
+          "type": "LogAnalysis",
+          "title": "Operations Warning messages from All nodes",
+          "config": {
+            "liQueryConfig": [
+              {
+                "liQueryName": "Ops-Operations Warning messages from All nodes",
+                "liQueryId": "{{RESOURCE_ID}}",
+                "id": "extModel5691-1"
+              }
+            ],
+            "queryFilter_searchtext": [],
+            "refreshInterval": 300,
+            "resource": [],
+            "refreshContent": {
+              "refreshContent": false
+            },
+            "relationshipMode": {
+              "relationshipMode": 0
+            },
+            "queryFilter": {
+              "size": 50,
+              "query": {
+                "bool": {
+                  "filter": []
+                }
+              }
+            },
+            "title": "Operations Warning messages from All nodes",
+            "liViewMode": "chart",
+            "liOverTime": {
+              "isOverTime": true,
+              "groupBy": [
+                "vmw_vr_ops_clustername",
+                "vmw_vr_ops_clusterrole",
+                "vmw_vr_ops_logtype",
+                "vmw_vr_ops_nodename"
+              ]
+            },
+            "liAggregationFunction": {
+              "eventType": "count"
+            },
+            "mode": "all",
+            "depth": 1,
+            "liQueryId": "{{RESOURCE_ID}}",
+            "chartType": "line",
+            "liQueryMode": 2,
+            "selfProvider": {
+              "selfProvider": false
+            }
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "s%3A%7B%22dateRange%22%3A%22dashboardTime%22%2C%22dateFrom%22%3Anull%2C%22dateTo%22%3Anull%2C%22timeFrom%22%3Anull%2C%22timeTo%22%3Anull%7D",
+              "key": "permDateRange_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_a4d5f265-6977-4205-a878-82d7976eddcf"
+            }
+          ]
+        },
+        {
+          "tabId": "6a56ac8e-7d2d-481e-9407-5af3c4248bde",
+          "collapsed": false,
+          "id": "686c878e-c18a-45c8-b456-0e9a7841d2ce",
+          "gridsterCoords": {
+            "w": 12,
+            "x": 1,
+            "h": 8,
+            "y": 23
+          },
+          "state": "",
+          "type": "LogAnalysis",
+          "title": "Operations Error messages from All nodes",
+          "config": {
+            "liQueryConfig": [
+              {
+                "liQueryName": "Ops-Operations Error messages from All nodes",
+                "liQueryId": "{{RESOURCE_ID}}",
+                "id": "extModel4917-1"
+              }
+            ],
+            "queryFilter_searchtext": [],
+            "refreshInterval": 300,
+            "resource": [],
+            "refreshContent": {
+              "refreshContent": false
+            },
+            "relationshipMode": {
+              "relationshipMode": 0
+            },
+            "queryFilter": {
+              "size": 50,
+              "query": {
+                "bool": {
+                  "filter": []
+                }
+              }
+            },
+            "title": "Operations Error messages from All nodes",
+            "liViewMode": "chart",
+            "liOverTime": {
+              "isOverTime": true,
+              "groupBy": [
+                "vmw_vr_ops_clustername",
+                "vmw_vr_ops_clusterrole",
+                "vmw_vr_ops_logtype",
+                "vmw_vr_ops_nodename"
+              ]
+            },
+            "liAggregationFunction": {
+              "eventType": "count"
+            },
+            "mode": "all",
+            "depth": 1,
+            "liQueryId": "{{RESOURCE_ID}}",
+            "chartType": "line",
+            "liQueryMode": 2,
+            "selfProvider": {
+              "selfProvider": false
+            }
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "s%3A%7B%22dateRange%22%3A%22dashboardTime%22%2C%22dateFrom%22%3Anull%2C%22dateTo%22%3Anull%2C%22timeFrom%22%3Anull%2C%22timeTo%22%3Anull%7D",
+              "key": "permDateRange_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_686c878e-c18a-45c8-b456-0e9a7841d2ce"
+            }
+          ]
+        },
+        {
+          "tabId": "6a56ac8e-7d2d-481e-9407-5af3c4248bde",
+          "collapsed": false,
+          "id": "606803e6-b686-498c-9137-df2bf8dcfcf2",
+          "gridsterCoords": {
+            "w": 12,
+            "x": 1,
+            "h": 8,
+            "y": 39
+          },
+          "state": "",
+          "type": "LogAnalysis",
+          "title": "Operations Exception messages from All nodes",
+          "config": {
+            "liQueryConfig": [
+              {
+                "liQueryName": "Ops-Operations Exception messages from All nodes",
+                "liQueryId": "{{RESOURCE_ID}}",
+                "id": "extModel6461-1"
+              }
+            ],
+            "queryFilter_searchtext": [],
+            "refreshInterval": 300,
+            "resource": [],
+            "refreshContent": {
+              "refreshContent": false
+            },
+            "relationshipMode": {
+              "relationshipMode": 0
+            },
+            "queryFilter": {
+              "size": 50,
+              "query": {
+                "bool": {
+                  "filter": []
+                }
+              }
+            },
+            "title": "Operations Exception messages from All nodes",
+            "liViewMode": "chart",
+            "liOverTime": {
+              "isOverTime": true,
+              "groupBy": [
+                "vmw_vr_ops_clustername",
+                "vmw_vr_ops_clusterrole",
+                "vmw_vr_ops_nodename",
+                "vmw_vr_ops_logtype"
+              ]
+            },
+            "liAggregationFunction": {
+              "eventType": "count"
+            },
+            "mode": "all",
+            "depth": 1,
+            "liQueryId": "{{RESOURCE_ID}}",
+            "chartType": "line",
+            "liQueryMode": 2,
+            "selfProvider": {
+              "selfProvider": false
+            }
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "s%3A%7B%22dateRange%22%3A%22dashboardTime%22%2C%22dateFrom%22%3Anull%2C%22dateTo%22%3Anull%2C%22timeFrom%22%3Anull%2C%22timeTo%22%3Anull%7D",
+              "key": "permDateRange_widget_6a56ac8e-7d2d-481e-9407-5af3c4248bde_606803e6-b686-498c-9137-df2bf8dcfcf2"
+            }
+          ]
+        }
+      ],
+      "userId": "{{OWNER_ID}}",
+      "states": [],
+      "editAllowed": true,
+      "homeTab": false,
+      "name": "vRealize Operations/Self Health",
+      "gridsterMaxColumns": 12,
+      "rank": 0,
+      "disabled": true,
+      "id": "6a56ac8e-7d2d-481e-9407-5af3c4248bde",
+      "locked": false,
+      "widgetInteractions": [
+        {
+          "widgetIdProvider": "d9042980-62bc-4e02-bec2-22b4b0f5eb76",
+          "type": "resourceId",
+          "widgetIdReceiver": "e8127196-6ba7-4f9e-8327-8a57fb74befc"
+        },
+        {
+          "widgetIdProvider": "d9042980-62bc-4e02-bec2-22b4b0f5eb76",
+          "type": "resourceId",
+          "widgetIdReceiver": "f1d90dd9-9ce0-49b7-b617-a1a33cc37df6"
+        },
+        {
+          "widgetIdProvider": "d9042980-62bc-4e02-bec2-22b4b0f5eb76",
+          "type": "resourceId",
+          "widgetIdReceiver": "ad9603f0-0cb6-4292-98e0-9cc4afc5b41c"
+        },
+        {
+          "widgetIdProvider": "e8127196-6ba7-4f9e-8327-8a57fb74befc",
+          "type": "resourceId",
+          "widgetIdReceiver": "ad9603f0-0cb6-4292-98e0-9cc4afc5b41c"
+        },
+        {
+          "widgetIdProvider": "e8127196-6ba7-4f9e-8327-8a57fb74befc",
+          "type": "resourceId",
+          "widgetIdReceiver": "f1d90dd9-9ce0-49b7-b617-a1a33cc37df6"
+        }
+      ],
+      "lastUpdateTime": 1791901243819
+    }
+  ],
+  "uuid": "{{RESOURCE_ID}}"
+}

@@ -1,0 +1,12 @@
+{
+  "reports": 1,
+  "dashboardsByOwner": [
+    {
+      "owner": "{{OWNER_ID}}",
+      "count": 1
+    }
+  ],
+  "type": "CUSTOM",
+  "dashboards": 1,
+  "views": 1
+}

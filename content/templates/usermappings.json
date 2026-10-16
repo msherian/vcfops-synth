@@ -1,0 +1,7 @@
+{
+   "sources": [],
+   "users": [{
+      "userName": "admin",
+      "userId": "{{OWNER_ID}}"
+   }]
+}

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Content>
+    <Reports>
+        <ReportDef id="7430bb1d-ae40-4767-ae00-ba949e5d1fda"><isTenant>false</isTenant><Title localizationKey="title">Optimization Report - Idle Virtual Machines</Title><Description localizationKey="desc">Idle VMs Report.</Description><SubjectType adapterKind="VMWARE" filter="[[{&quot;filterType&quot;:&quot;metrics&quot;,&quot;metricKey&quot;:&quot;summary|idle&quot;,&quot;condition&quot;:&quot;EQUALS&quot;,&quot;metricValue&quot;:{&quot;value&quot;:1,&quot;isStringMetric&quot;:false}}]]" resourceKind="VirtualMachine" type="descendant" /><SubjectType adapterKind="VMWARE" filter="[[{&quot;filterType&quot;:&quot;metrics&quot;,&quot;metricKey&quot;:&quot;summary|idle&quot;,&quot;condition&quot;:&quot;EQUALS&quot;,&quot;metricValue&quot;:{&quot;value&quot;:1,&quot;isStringMetric&quot;:false}}]]" resourceKind="VirtualMachine" type="self" /><Sections><Section><ContentType>CoverPage</ContentType><ContentKey>COVER_PAGE</ContentKey></Section><Section><ContentType>View</ContentType><ContentKey>8e8cb20a-cf6d-4104-8e6e-25919b84cf9a</ContentKey><ContentOrientation>Landscape</ContentOrientation></Section></Sections><Settings><ShowPageFooter>true</ShowPageFooter><OutputFormat>pdf</OutputFormat><OutputFormat>csv</OutputFormat></Settings></ReportDef>
+    </Reports>
+</Content>
