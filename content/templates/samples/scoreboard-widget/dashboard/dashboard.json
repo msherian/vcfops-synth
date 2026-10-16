@@ -1,0 +1,297 @@
+{
+  "entries": [],
+  "dashboards": [
+    {
+      "shared": true,
+      "hidden": true,
+      "creationTime": 1791930619751,
+      "autoswitchEnabled": false,
+      "importAttempts": 0,
+      "lastUpdateUserId": "{{OWNER_ID}}",
+      "columnProportion": "1",
+      "importComplete": true,
+      "description": "Used in Report : Executive Summary Report",
+      "columnCount": 1,
+      "widgets": [
+        {
+          "tabId": "ad868eac-5e74-474c-99d0-140e87fdd828",
+          "collapsed": false,
+          "id": "240b3f3b-ffdb-485a-9704-24909bc7821f",
+          "gridsterCoords": {
+            "w": 12,
+            "x": 1,
+            "h": 3,
+            "y": 1
+          },
+          "state": "",
+          "type": "Scoreboard",
+          "title": "Environment Summary",
+          "config": {
+            "visualTheme": 5,
+            "maxCellCount": 100,
+            "showMetricName": {
+              "showMetricName": true
+            },
+            "refreshInterval": 300,
+            "refreshContent": {
+              "refreshContent": true
+            },
+            "relationshipMode": {
+              "relationshipMode": 0
+            },
+            "valueSize": 24,
+            "boxHeight": null,
+            "title": "Environment Summary",
+            "showResourceName": {
+              "showResourceName": false
+            },
+            "roundDecimals": 0,
+            "showMetricUnit": {
+              "showMetricUnit": true
+            },
+            "mode": {
+              "layoutMode": "fixedView"
+            },
+            "labelSize": 12,
+            "metric": {
+              "mode": "resourceKind",
+              "resourceMetrics": [],
+              "resourceKindMetrics": [
+                {
+                  "yellowBound": null,
+                  "metricUnitId": null,
+                  "metricName": "Summary|Total Number of Datacenters",
+                  "metricKey": "summary|total_number_datacenters",
+                  "isStringMetric": false,
+                  "resourceKindName": "vSphere World",
+                  "label": "Datacenters",
+                  "resourceKindId": "resourceKind:id:{{RESOURCE_KIND_ID}}_::_",
+                  "orangeBound": null,
+                  "unit": "",
+                  "id": "extModel7625-1",
+                  "redBound": null,
+                  "colorMethod": 2
+                },
+                {
+                  "yellowBound": null,
+                  "metricUnitId": null,
+                  "metricName": "Summary|Total Number of Clusters",
+                  "metricKey": "summary|total_number_clusters",
+                  "isStringMetric": false,
+                  "resourceKindName": "vSphere World",
+                  "label": "Clusters",
+                  "resourceKindId": "resourceKind:id:{{RESOURCE_KIND_ID}}_::_",
+                  "orangeBound": null,
+                  "unit": "",
+                  "id": "extModel7625-2",
+                  "redBound": null,
+                  "colorMethod": 2
+                },
+                {
+                  "yellowBound": null,
+                  "metricUnitId": null,
+                  "metricName": "Summary|Total Number of Hosts",
+                  "metricKey": "summary|total_number_hosts",
+                  "isStringMetric": false,
+                  "resourceKindName": "vSphere World",
+                  "label": "Hosts",
+                  "resourceKindId": "resourceKind:id:{{RESOURCE_KIND_ID}}_::_",
+                  "orangeBound": null,
+                  "unit": "",
+                  "id": "extModel7625-3",
+                  "redBound": null,
+                  "colorMethod": 2
+                },
+                {
+                  "yellowBound": null,
+                  "metricUnitId": null,
+                  "metricName": "Summary|Total Number of Datastores",
+                  "metricKey": "summary|total_number_datastores",
+                  "isStringMetric": false,
+                  "resourceKindName": "vSphere World",
+                  "label": "Datastores",
+                  "resourceKindId": "resourceKind:id:{{RESOURCE_KIND_ID}}_::_",
+                  "orangeBound": null,
+                  "unit": "",
+                  "id": "extModel7625-4",
+                  "redBound": null,
+                  "colorMethod": 2
+                },
+                {
+                  "yellowBound": null,
+                  "metricUnitId": null,
+                  "metricName": "Summary|Total Number of VMs",
+                  "metricKey": "summary|total_number_vms",
+                  "isStringMetric": false,
+                  "resourceKindName": "vSphere World",
+                  "label": "Virtual Machines",
+                  "resourceKindId": "resourceKind:id:{{RESOURCE_KIND_ID}}_::_",
+                  "orangeBound": null,
+                  "unit": "",
+                  "id": "extModel7625-5",
+                  "redBound": null,
+                  "colorMethod": 2
+                }
+              ]
+            },
+            "showSparkline": {
+              "showSparkline": false
+            },
+            "boxColumns": 5,
+            "periodLength": null,
+            "selfProvider": {
+              "selfProvider": true
+            },
+            "resInteractionMode": null
+          },
+          "height": 0
+        },
+        {
+          "tabId": "ad868eac-5e74-474c-99d0-140e87fdd828",
+          "collapsed": false,
+          "id": "66eddc23-a58f-498a-b941-675f683bcf0e",
+          "gridsterCoords": {
+            "w": 8,
+            "x": 1,
+            "h": 6,
+            "y": 4
+          },
+          "state": "",
+          "type": "View",
+          "title": "Monthly VM Count for past 6 months",
+          "config": {
+            "resource": {
+              "qshowDelay": 0,
+              "resourceKindKey": "vSphere World",
+              "resourceId": "resource:id:{{RESOURCE_ID}}_::_",
+              "expandable": true,
+              "isLast": true,
+              "iconSrc": "images/resknd/default/16x16/VMWARE_vSphere World.png",
+              "traversalSpecId": "vSphere Storage-VMWARE-vSphere World",
+              "icon": "",
+              "loaded": false,
+              "isFirst": true,
+              "expanded": false,
+              "rootResourceId": "{{RESOURCE_ID}}",
+              "children": null,
+              "adapterKindId": "VMWARE",
+              "root": false,
+              "checked": null,
+              "hrefTarget": "",
+              "href": "",
+              "id": "{{RESOURCE_ID}}",
+              "text": "vSphere World",
+              "iconCls": "resknd_default_vmware_vsphereworld",
+              "qtitle": "",
+              "visible": true,
+              "index": 0,
+              "resourceName": "{{RESOURCE_NAME}}",
+              "cls": "",
+              "resourceKindId": "002006VMWAREvSphere World",
+              "leaf": false,
+              "loading": false,
+              "nodeType": "resource",
+              "parentId": "source",
+              "depth": 1,
+              "resourceKindType": 8,
+              "allowDrag": true,
+              "allowDrop": true,
+              "uniqueId": "{{RESOURCE_ID}}_1515878404385",
+              "qtip": ""
+            },
+            "chartViewItems": [],
+            "selfProvider": {
+              "selfProvider": true
+            },
+            "title": "Monthly VM Count for past 6 months",
+            "viewDefinitionId": "a084bf52-c0ac-4be1-b3ba-a7521d6adf36"
+          },
+          "height": 0
+        },
+        {
+          "tabId": "ad868eac-5e74-474c-99d0-140e87fdd828",
+          "collapsed": false,
+          "id": "71294e54-e0b1-4527-a82e-f371526d30bc",
+          "gridsterCoords": {
+            "w": 4,
+            "x": 9,
+            "h": 6,
+            "y": 4
+          },
+          "state": "",
+          "type": "View",
+          "title": "VM Growth Trend for the past 6 months",
+          "config": {
+            "resource": {
+              "qshowDelay": 0,
+              "resourceKindKey": "vSphere World",
+              "resourceId": "resource:id:{{RESOURCE_ID}}_::_",
+              "expandable": true,
+              "isLast": true,
+              "iconSrc": "images/resknd/default/16x16/VMWARE_vSphere World.png",
+              "traversalSpecId": "vSphere Storage-VMWARE-vSphere World",
+              "icon": "",
+              "loaded": false,
+              "isFirst": true,
+              "expanded": false,
+              "rootResourceId": "{{RESOURCE_ID}}",
+              "children": null,
+              "adapterKindId": "VMWARE",
+              "root": false,
+              "checked": null,
+              "hrefTarget": "",
+              "href": "",
+              "id": "{{RESOURCE_ID}}",
+              "text": "vSphere World",
+              "iconCls": "resknd_default_vmware_vsphereworld",
+              "qtitle": "",
+              "visible": true,
+              "index": 0,
+              "resourceName": "{{RESOURCE_NAME}}",
+              "cls": "",
+              "resourceKindId": "002006VMWAREvSphere World",
+              "leaf": false,
+              "loading": false,
+              "nodeType": "resource",
+              "parentId": "source",
+              "depth": 1,
+              "resourceKindType": 8,
+              "allowDrag": true,
+              "allowDrop": true,
+              "uniqueId": "{{RESOURCE_ID}}_1515880547997",
+              "qtip": ""
+            },
+            "chartViewItems": [
+              "legend"
+            ],
+            "selfProvider": {
+              "selfProvider": true
+            },
+            "title": "VM Growth Trend for the past 6 months",
+            "viewDefinitionId": "85924cc2-c735-4208-8254-ed06b3bb5b1a"
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "b%3A0",
+              "key": "perm_toolbarVisible_widget_ad868eac-5e74-474c-99d0-140e87fdd828_71294e54-e0b1-4527-a82e-f371526d30bc"
+            }
+          ]
+        }
+      ],
+      "userId": "{{OWNER_ID}}",
+      "states": [],
+      "editAllowed": true,
+      "homeTab": false,
+      "name": "Environment Summary",
+      "gridsterMaxColumns": 12,
+      "rank": 0,
+      "disabled": true,
+      "id": "ad868eac-5e74-474c-99d0-140e87fdd828",
+      "adapterName": "VMware vSphere",
+      "locked": false,
+      "lastUpdateTime": 1791930624789
+    }
+  ],
+  "uuid": "{{RESOURCE_ID}}"
+}

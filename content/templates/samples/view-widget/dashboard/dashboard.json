@@ -1,0 +1,130 @@
+{
+  "entries": [],
+  "dashboards": [
+    {
+      "shared": true,
+      "hidden": true,
+      "creationTime": 1791930619959,
+      "autoswitchEnabled": false,
+      "importAttempts": 0,
+      "columnProportion": "1-1",
+      "importComplete": true,
+      "description": "Monitor and troubleshoot the availability related problems of vCenter Appliance",
+      "widgets": [
+        {
+          "tabId": "e77b3d6d-f7aa-483e-bf3f-baababd4996c",
+          "collapsed": false,
+          "id": "9ecdacd4-3094-4fc1-b90a-b1916439708d",
+          "gridsterCoords": {
+            "w": 6,
+            "x": 1,
+            "h": 10,
+            "y": 1
+          },
+          "state": "",
+          "type": "View",
+          "title": "vCenter Appliance",
+          "config": {
+            "refreshInterval": 300,
+            "resource": {
+              "resourceId": "resource:id:{{RESOURCE_ID}}_::_",
+              "traversalSpecId": "",
+              "resourceName": "{{RESOURCE_NAME}}",
+              "id": "Ext.vcops.chrome.model.Resource-16",
+              "resourceKindId": "002009ContainerUniverse"
+            },
+            "traversalSpecId": null,
+            "refreshContent": {
+              "refreshContent": false
+            },
+            "isUpdatedView": true,
+            "chartViewItems": [],
+            "selectFirstRow": {
+              "selectFirstRow": false
+            },
+            "selfProvider": {
+              "selfProvider": true
+            },
+            "title": "vCenter Appliance",
+            "viewDefinitionId": "9d975d06-74c1-41f6-a0ee-ddd9331cc88e"
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "o%3Acolumns%3Da%253Ao%25253Aid%25253Ds%2525253ApermTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_9ecdacd4-3094-4fc1-b90a-b1916439708d-column-0%25255Ehidden%25253Db%2525253A0%25255Ewidth%25253Dn%2525253A282.6000061035156%255Eo%25253Aid%25253Ds%2525253ApermTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_9ecdacd4-3094-4fc1-b90a-b1916439708d-column-APPLICATION%2525257CPING_AVAILABILITY1%25255Ehidden%25253Db%2525253A0%255Eo%25253Aid%25253Ds%2525253ApermTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_9ecdacd4-3094-4fc1-b90a-b1916439708d-column-APPLICATION%2525257CPING_AVAILABILITY2%25255Ehidden%25253Db%2525253A0%255Eo%25253Aid%25253Ds%2525253ApermTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_9ecdacd4-3094-4fc1-b90a-b1916439708d-column-summary%2525257Ctotal_number_hosts3%25255Ehidden%25253Db%2525253A0%255Eo%25253Aid%25253Ds%2525253ApermTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_9ecdacd4-3094-4fc1-b90a-b1916439708d-column-summary%2525257Ctotal_number_vms4%25255Ehidden%25253Db%2525253A0",
+              "key": "permTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_9ecdacd4-3094-4fc1-b90a-b1916439708d"
+            }
+          ]
+        },
+        {
+          "tabId": "e77b3d6d-f7aa-483e-bf3f-baababd4996c",
+          "collapsed": false,
+          "id": "1ca2c4c7-36f0-4d6c-aff0-01482f9f4bc2",
+          "gridsterCoords": {
+            "w": 6,
+            "x": 7,
+            "h": 10,
+            "y": 1
+          },
+          "state": "",
+          "type": "View",
+          "title": "Services in selected vCenter",
+          "config": {
+            "refreshInterval": 300,
+            "resource": null,
+            "traversalSpecId": "",
+            "refreshContent": {
+              "refreshContent": false
+            },
+            "isUpdatedView": true,
+            "chartViewItems": [],
+            "selectFirstRow": {
+              "selectFirstRow": false
+            },
+            "selfProvider": {
+              "selfProvider": false
+            },
+            "title": "Services in selected vCenter",
+            "viewDefinitionId": "95fdf031-4ebf-41d2-80ee-6ff0f51852e3"
+          },
+          "height": 0,
+          "states": [
+            {
+              "value": "o%3Acolumns%3Da%253Ao%25253Aid%25253Ds%2525253ApermTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_1ca2c4c7-36f0-4d6c-aff0-01482f9f4bc2-column-0%25255Ehidden%25253Db%2525253A0%255Eo%25253Aid%25253Ds%2525253ApermTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_1ca2c4c7-36f0-4d6c-aff0-01482f9f4bc2-column-SERVICE%2525257CAVAILABILITY1%25255Ehidden%25253Db%2525253A0%255Eo%25253Aid%25253Ds%2525253ApermTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_1ca2c4c7-36f0-4d6c-aff0-01482f9f4bc2-column-SERVICE%2525257CHEALTH2%25255Ehidden%25253Db%2525253A0%255Eo%25253Aid%25253Ds%2525253ApermTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_1ca2c4c7-36f0-4d6c-aff0-01482f9f4bc2-column-SERVICE%2525257CSTATUS3%25255Ehidden%25253Db%2525253A0",
+              "key": "permTableView_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_1ca2c4c7-36f0-4d6c-aff0-01482f9f4bc2"
+            },
+            {
+              "value": "b%3A0",
+              "key": "perm_isDashboardTime_widget_e77b3d6d-f7aa-483e-bf3f-baababd4996c_1ca2c4c7-36f0-4d6c-aff0-01482f9f4bc2"
+            }
+          ]
+        }
+      ],
+      "states": [],
+      "editAllowed": true,
+      "homeTab": false,
+      "rank": 0,
+      "disabled": false,
+      "id": "e77b3d6d-f7aa-483e-bf3f-baababd4996c",
+      "adapterName": "VMware vSphere",
+      "locked": false,
+      "dashboardNavigations": {},
+      "widgetInteractions": [
+        {
+          "widgetIdProvider": "9ecdacd4-3094-4fc1-b90a-b1916439708d",
+          "type": "resourceId",
+          "widgetIdReceiver": "1ca2c4c7-36f0-4d6c-aff0-01482f9f4bc2"
+        }
+      ],
+      "namePath": "vSphere",
+      "lastUpdateUserId": "{{OWNER_ID}}",
+      "docCenterKey": "vcom_792",
+      "columnCount": 1,
+      "userId": "{{OWNER_ID}}",
+      "name": "vSphere/vCenter Appliance Availability",
+      "gridsterMaxColumns": 12,
+      "lastUpdateTime": 1791930624794
+    }
+  ],
+  "uuid": "{{RESOURCE_ID}}"
+}

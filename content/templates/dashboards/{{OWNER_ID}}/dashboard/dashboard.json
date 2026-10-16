@@ -32,7 +32,7 @@
                 "mode": {
                   "mode": false
                 },
-                "resourceKind": "resourceKind:id:64_::_",
+                "resourceKind": "resourceKind:id:{{RESOURCE_KIND_ID}}_::_",
                 "tagFilter": null,
                 "colorBy": {
                   "metricKey": "badge|health",
@@ -77,7 +77,7 @@
                   "originalText": "",
                   "depth": 2,
                   "allowDrag": true,
-                  "typeId": "resourceKind:id:63_::_",
+                  "typeId": "resourceKind:id:{{RESOURCE_KIND_ID}}_::_",
                   "allowDrop": true,
                   "qtip": ""
                 },
@@ -177,8 +177,8 @@
             "topIssuesDisplayLimit": 5,
             "refreshInterval": 60,
             "resource": {
-              "resourceId": "resource:id:6_::_",
-              "resourceName": "vC Ops Cluster-evn-ldu1"
+              "resourceId": "resource:id:{{RESOURCE_ID}}_::_",
+              "resourceName": "{{RESOURCE_NAME}}"
             },
             "refreshContent": {
               "refreshContent": true
