@@ -30,6 +30,7 @@
         'Resolve-SynthPlanId'
         'New-SynthBackfillSpec'
         'Invoke-SynthBackfill'
+        'Read-SynthBackfillState'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

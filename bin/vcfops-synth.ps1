@@ -572,6 +572,8 @@ try {
                 $spec = @(New-SynthBackfillSpec -Plan $plan -Inventory $inventory -Ids $ids)
                 $series = ($spec | ForEach-Object { $_.Series.Count } | Measure-Object -Sum).Sum
                 $samples = [long]$series * $range.Points
+                # A saved range of the same length is resumed, so show the one that will be written.
+                if (-not $options.Restart) { $range = (Read-SynthBackfillState -Path $config.paths.state -Range $range).range }
                 $from = [DateTimeOffset]::FromUnixTimeMilliseconds($range.StartMs).ToString('u')
                 $to = [DateTimeOffset]::FromUnixTimeMilliseconds($range.EndMs).ToString('u')
                 Write-Host "Backfill for adapter instance ${adapterName}: $days days at $($config.intervalMinutes) minutes, $from to $to ($($range.Points) points)"
