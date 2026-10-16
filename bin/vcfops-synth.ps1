@@ -341,15 +341,25 @@ function New-CliSeedPlan {
 }
 
 try {
+    # --name is not an option. pwsh -File would quietly bind --concurrency to -Concurrency, and a
+    # direct call puts it in -Source, so look at the raw arguments after this script as well.
+    $argv = [Environment]::GetCommandLineArgs()
+    $self = [array]::FindIndex($argv, [Predicate[string]] { param($a) try { [IO.Path]::GetFullPath($a) -ieq $PSCommandPath } catch { $false } })
+    $raw = @(if ($self -ge 0) { $argv | Select-Object -Skip ($self + 1) }) + @($Command, $Source) + @($Unrecognised)
+    $dashed = @($raw | Where-Object { $_ -match '^--' } | Select-Object -Unique)
+    if ($dashed.Count) {
+        $parameters = $MyInvocation.MyCommand.Parameters.Values | Where-Object Name -NE 'Unrecognised'
+        foreach ($token in $dashed) {
+            $name = ($token -replace '^-+', '') -replace '-', ''
+            $match = @($parameters | Where-Object { $_.Name -ieq $name -or $_.Aliases -icontains $name } | Select-Object -ExpandProperty Name)
+            $suggestion = if ($match.Count) { " Did you mean -$($match[0])?" } elseif ($name -ieq 'help') { " Did you mean 'help'?" } else { '' }
+            Write-Host "Unknown option '$token'.$suggestion"
+        }
+        Write-Host "Run 'help' for usage."
+        exit 2
+    }
     if ($Unrecognised) {
-        # The old --kebab-case options read as their PowerShell names, so say which one was meant.
-        $hints = @($Unrecognised | Where-Object { $_ -match '^--?[a-z][a-z-]*$' } | ForEach-Object {
-                $name = (($_ -replace '^-+', '') -split '-' | ForEach-Object { if ($_) { $_.Substring(0, 1).ToUpperInvariant() + $_.Substring(1) } }) -join ''
-                $known = @($optionSpec.Keys | Where-Object { $_ -ieq $name -or ($name -ieq 'Perf' -and $_ -eq 'Performance') -or ($name -ieq 'NoAnonymize' -and $_ -eq 'NoAnonymise') })
-                if ($known.Count) { "$_ is now -$($known[0])" }
-            })
-        $hint = if ($hints.Count) { " ($($hints -join '; '))" } else { '' }
-        Write-Host "Unexpected argument(s) for '$Command': $($Unrecognised -join ' ')$hint. Run 'help' for usage."
+        Write-Host "Unexpected argument(s) for '$Command': $($Unrecognised -join ' '). Run 'help' for usage."
         exit 2
     }
     $commandName = $Command.ToLowerInvariant()
@@ -360,7 +370,7 @@ try {
     }
 
     switch ($commandName) {
-        { $_ -in 'help', '-h', '--help' } {
+        'help' {
             Show-Help
             exit 0
         }
