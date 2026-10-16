@@ -144,6 +144,16 @@ Describe 'Read-SynthCredentialFile' {
         { Read-SynthCredentialFile -Path $path } | Should -Throw '*lists 2 VCF Operations (ops-a.example.test, ops-b.example.test); choose one with -Fqdn*'
     }
 
+    It 'tells an unreadable file from one that is not JSON' {
+        # A folder passes the existence check but cannot be read, as an unreadable mount cannot.
+        $folder = Join-Path $TestDrive 'creds-folder.json'
+        $null = New-Item -ItemType Directory -Path $folder
+        { Read-SynthCredentialFile -Path $folder } | Should -Throw '*cannot be read*uid 999*'
+        $broken = Join-Path $TestDrive 'broken-creds.json'
+        Set-Content -Path $broken -Value '{ "components": '
+        { Read-SynthCredentialFile -Path $broken } | Should -Throw '*not valid JSON*'
+    }
+
     It 'says what is missing' {
         { Read-SynthCredentialFile -Path (Join-Path $TestDrive 'absent.json') } | Should -Throw '*does not exist*'
         { Read-SynthCredentialFile -Path (New-CredFile @(, (New-Component 'vCenter' 'vc.example.test' @($script:admin)))) } | Should -Throw '*has no VCF Operations entry*'
