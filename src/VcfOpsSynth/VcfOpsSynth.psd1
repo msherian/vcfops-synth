@@ -48,6 +48,10 @@
         'ConvertTo-SynthSymptomBody'
         'ConvertTo-SynthAlertBody'
         'Publish-SynthAlertContent'
+        'Get-SynthSeededObject'
+        'Remove-SynthSeededObject'
+        'Remove-SynthContent'
+        'Clear-SynthState'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
