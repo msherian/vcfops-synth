@@ -31,6 +31,9 @@
         'New-SynthBackfillSpec'
         'Invoke-SynthBackfill'
         'Read-SynthBackfillState'
+        'Get-SynthGroupDefinition'
+        'ConvertTo-SynthGroupBody'
+        'Publish-SynthGroup'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

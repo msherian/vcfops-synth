@@ -377,6 +377,14 @@ Describe 'New-SynthSeedPlan' {
         Get-Entry $script:linuxVm.properties 'config|createDate' | Should -Be '-'
     }
 
+    It 'writes the VM''s tier, application and profile as the toolset''s own properties' {
+        $inventory = New-TestInventory
+        $inventory.vms[0].tier = 'Gold'; $inventory.vms[0].application = 'Payments'; $inventory.vms[0].profile = 'steady'
+        $vm = Get-PlanObject (New-SynthSeedPlan -Inventory $inventory -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001') 'vm-3333000001'
+        "$(Get-Entry $vm.properties 'vcfops-synth|tier') $(Get-Entry $vm.properties 'vcfops-synth|application') $(Get-Entry $vm.properties 'vcfops-synth|profile')" | Should -Be 'Gold Payments steady'
+        Get-Entry (Get-PlanObject (New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001') 'vm-3333000001').properties 'vcfops-synth|tier' | Should -BeNullOrEmpty
+    }
+
     It 'writes several tags, the synthetic marker and the project' {
         $tagged = New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric (New-TestRubricSet) -VcId 'vc-uuid-0001' -Tag @(@{ Category = 'vcfops-synth'; Name = 'synthetic' }, @{ Category = 'Project'; Name = '2026.0001 Example Ltd - OPP-1' })
         $o = Get-PlanObject $tagged 'vm-3333000001'
