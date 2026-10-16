@@ -61,10 +61,29 @@ Describe 'vcfops-synth CLI' {
         $result.Output | Should -Not -BeLike '*not built yet*'
     }
 
-    It 'points the old --options at their PowerShell parameters' {
+    It 'refuses --options as unknown and names the parameter meant' {
         $result = Invoke-Cli @('backfill', '--dry-run', '--max-vms', '5')
         $result.ExitCode | Should -Be 2
-        $result.Output | Should -BeLike '*--dry-run is now -DryRun*--max-vms is now -MaxVms*'
+        $result.Output | Should -BeLike "*Unknown option '--dry-run'. Did you mean -DryRun?*Unknown option '--max-vms'. Did you mean -MaxVms?*"
+    }
+
+    It 'refuses a --option that pwsh -File would otherwise bind to its parameter' {
+        # pwsh -File binds --concurrency 4 as -Concurrency 4; it must still be refused.
+        $result = Invoke-Cli @('backfill', '-DryRun', '--concurrency', '4')
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike "*Unknown option '--concurrency'. Did you mean -Concurrency?*"
+    }
+
+    It 'refuses a --option given to the script directly, where it lands in -Source' {
+        $output = & $script:cli backfill -DryRun --concurrency 4 6>&1
+        $LASTEXITCODE | Should -Be 2
+        ($output -join "`n") | Should -BeLike "*Unknown option '--concurrency'. Did you mean -Concurrency?*"
+    }
+
+    It 'refuses --help, pointing at help' {
+        $result = Invoke-Cli @('--help')
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike "*Unknown option '--help'. Did you mean 'help'?*"
     }
 
     It 'refuses a parameter the command does not take' {
