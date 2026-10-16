@@ -138,7 +138,7 @@ function ConvertTo-SynthAlertBody {
     .DESCRIPTION
         Each state needs all of its items to hold; an item that is a list of
         names holds when any of them does. A state of one plain set becomes a
-        SYMPTOM_SET; anything else a COMPOSITE_SYMPTOM of sets joined by AND.
+        SYMPTOM_SET; anything else a SYMPTOM_SET_COMPOSITE of sets joined by AND.
     #>
     [CmdletBinding()]
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
@@ -157,7 +157,7 @@ function ConvertTo-SynthAlertBody {
         $sets = @()
         if ($singles.Count) { $sets += , (& $set $singles 'AND') }
         foreach ($group in $anyOf) { $sets += , (& $set @($group) 'OR') }
-        $base = if ($sets.Count -eq 1) { $sets[0] } else { [ordered]@{ type = 'COMPOSITE_SYMPTOM'; operator = 'AND'; 'symptom-sets' = $sets } }
+        $base = if ($sets.Count -eq 1) { $sets[0] } else { [ordered]@{ type = 'SYMPTOM_SET_COMPOSITE'; operator = 'AND'; 'symptom-sets' = $sets } }
         $entry = [ordered]@{ severity = $s.Severity; 'base-symptom-set' = $base; impact = [ordered]@{ impactType = 'BADGE'; detail = 'HEALTH' } }
         if ($s.Recommendation -and $RecommendationId.ContainsKey($s.Recommendation)) { $entry.recommendationPriorityMap = @{ $RecommendationId[$s.Recommendation] = 1 } }
         $entry

@@ -74,7 +74,7 @@ Describe 'ConvertTo-SynthAlertBody' {
         $d = $script:content.Alerts | Where-Object Name -eq 'Synth-Silver VM disk latency'
         $json = ConvertTo-SynthAlertBody -Definition $d -SymptomId $script:ids | ConvertTo-Json -Depth 20 | ConvertFrom-Json
         $base = $json.states[0].'base-symptom-set'
-        "$($base.type) $($base.operator)" | Should -Be 'COMPOSITE_SYMPTOM AND'
+        "$($base.type) $($base.operator)" | Should -Be 'SYMPTOM_SET_COMPOSITE AND'
         $sets = @($base.'symptom-sets')
         "$($sets[0].symptomSetOperator) $($sets[0].symptomDefinitionIds -join ',')" | Should -Be "AND $($script:ids['Synth-VM tier is Silver'])"
         "$($sets[1].symptomSetOperator) $($sets[1].symptomDefinitionIds -join ',')" | Should -Be ('OR {0},{1}' -f $script:ids['Synth-VM disk read latency above 40 ms'], $script:ids['Synth-VM disk write latency above 40 ms'])
