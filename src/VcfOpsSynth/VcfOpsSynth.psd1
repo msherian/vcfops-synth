@@ -34,6 +34,16 @@
         'Get-SynthGroupDefinition'
         'ConvertTo-SynthGroupBody'
         'Publish-SynthGroup'
+        'New-SynthFeedObject'
+        'Get-SynthFeedTime'
+        'Get-SynthScenarioCatalogue'
+        'Resolve-SynthScenarioTarget'
+        'Get-SynthScenarioEffect'
+        'Read-SynthScenarioState'
+        'Start-SynthScenario'
+        'Stop-SynthScenario'
+        'Set-SynthFeedOverlay'
+        'Invoke-SynthFeed'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
