@@ -18,7 +18,7 @@ Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history
 | `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
 | `reset` | Remove the objects seed created | to come (3) |
 | `backfill` | Push generated history for every numeric metric | 4 |
-| `content` | Groups, policies, alerts, dashboards | to come (5 to 7) |
+| `content` | Custom groups, symptoms, alerts and super metrics; policies and dashboards to come | 5 and 6 (7 to come) |
 | `feed` | Live point every interval with analytics on, carrying on from the backfill | 6 |
 | `scenario` | Start, stop and list scenario overlays (S1 to S4, S8) | 6 |
 | `live-load` | Optional UPSA and load VMs | to come (9) |
@@ -152,7 +152,7 @@ Progress is saved to `paths.state` after each batch, so a stopped run resumes ov
 | S1 noisy neighbour | host | Bronze VMs take 95 % CPU and are marked `vcfops-synth\|scenario`; Gold and Silver VMs there see 12 % ready and 15 % contention; the host demands 115 % |
 | S2 memory pressure | host | Its VMs balloon 25 % and swap; the host runs at 98 % memory with contention |
 | S3 storage latency | datastore | 45 ms read and write latency on the datastore and the VMs on it |
-| S4 guest disk filling | VM | Each guest file system fills to 95 % of its capacity |
+| S4 guest disk filling | VM | Each guest file system fills to 97 % of its capacity |
 | S8 host failure | host | The host stops reporting and shows as not responding; the other hosts in its cluster take its load and the cluster loses its capacity |
 
 ```bash
@@ -160,6 +160,22 @@ pwsh ./bin/vcfops-synth.ps1 feed -ConfigPath ./config/lab.json
 pwsh ./bin/vcfops-synth.ps1 scenario -Start S1 -ConfigPath ./config/lab.json
 pwsh ./bin/vcfops-synth.ps1 scenario -Stop all -ConfigPath ./config/lab.json
 ```
+
+`content` publishes the symptoms, alerts and super metrics that make the scenarios show up in Operations, by name with the content prefix; existing ones are updated in place and anything outside the prefix is never touched. Thresholds follow the tiers, read from the `vcfops-synth|tier` property seed writes, so one set of alerts covers every tier:
+
+| Alert | Raised by | Warning | Critical |
+|---|---|---|---|
+| Gold VM CPU contention | S1 | ready above 3 % | above 5 % |
+| Silver VM CPU contention | S1 | ready above 5 % | above 10 % |
+| Gold, Silver, Bronze VM disk latency | S3 | above 10, 20, none ms | above 20, 40, 50 ms |
+| VM memory pressure | S2 | ballooning above 10 % | swapping in |
+| VM guest file system nearly full | S4 | above 90 % | above 95 % |
+| Host memory pressure | S2 | | usage above 95 % with ballooning above 5 % |
+| Host CPU overcommitted | S1 | | demand above 100 % |
+| Host not responding | S8 | | connection state notResponding |
+| Datastore latency | S3 | | read or write above 30 ms |
+
+Each alert has a recommendation. The super metrics are VM CPU demand over allocation, the worst VM CPU ready and disk latency in each cluster, and the average VM health in each tier group; a policy must enable them before Operations computes them.
 
 ## Development
 

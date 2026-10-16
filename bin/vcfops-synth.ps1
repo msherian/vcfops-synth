@@ -85,7 +85,9 @@
         content           Publishes the toolset's custom groups (one per tier, one per application from the
                           tier rules, and the scenario targets), by name with the prefix; existing ones are updated.
                           Membership follows the vcfops-synth|tier and |application properties seed writes.
-                          Tiered policies follow (Phase 5); alerts and dashboards in Phases 6 and 7.
+                          Then the symptoms, alerts (with tier thresholds), recommendations and super metrics
+                          the scenarios raise. Exit code 1 when any item is rejected; the rest are still published.
+                          Tiered policies follow (Phase 5); dashboards in Phase 7.
                           -DryRun        list what would be created or updated (VCFOPS_SYNTH_DRY_RUN)
 
         feed              Pushes a live point for every seeded object each intervalMinutes, with analytics on, so
@@ -567,16 +569,24 @@ try {
             $config = Get-CliConfig
             $inventory = Get-SynthInventory -Path $config.paths.inventory
             $groups = @(Get-SynthGroupDefinition -Inventory $inventory -Prefix $config.prefix)
-            Write-Host "Content for $($config.operations.fqdn): $($groups.Count) custom groups"
+            $alertContent = Get-SynthAlertContent -Prefix $config.prefix
+            Write-Host ("Content for {0}: {1} custom groups, {2} symptoms, {3} recommendations, {4} alerts, {5} super metrics" -f $config.operations.fqdn, $groups.Count,
+                $alertContent.Symptoms.Count, $alertContent.Recommendations.Count, $alertContent.Alerts.Count, $alertContent.SuperMetrics.Count)
             $null = Connect-Cli -Config $config
+            $failed = 0
             try {
                 $results = @(Publish-SynthGroup -Definition $groups -Prefix $config.prefix -WhatIf:([bool]$options.DryRun))
                 foreach ($r in $results) { Write-Host ('  {0,-14} {1}' -f $r.Action, $r.Name) }
+                foreach ($r in @(Publish-SynthAlertContent -Content $alertContent -Prefix $config.prefix -WhatIf:([bool]$options.DryRun))) {
+                    Write-Host ('  {0,-14} {1,-14} {2}' -f $r.Action, $r.Kind, $r.Name)
+                    if ($r.Error) { $failed++; Write-Host "    $($r.Error)" }
+                }
                 if ($options.DryRun) { Write-Host 'Dry run: nothing was changed.' }
             }
             finally {
                 Disconnect-SynthOps -Confirm:$false
             }
+            if ($failed) { Write-Host "$failed item(s) failed; the rest were published."; exit 1 }
             exit 0
         }
 
