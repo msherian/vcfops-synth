@@ -305,6 +305,24 @@ Describe 'Invoke-SynthFeed' {
         Should -Invoke -ModuleName VcfOpsSynth Invoke-SynthFeedEngine -Times 0 -Exactly
     }
 
+    It 'keeps the last push where it was when every push in a cycle fails' {
+        Mock -ModuleName VcfOpsSynth Invoke-SynthFeedEngine { foreach ($f in $Feed) { $r = [VcfOpsSynth.PushResult]::new(); $r.Key = $f.Spec.Key; $r.Status = 500; $r.Error = 'down'; $r } }
+        $live = (Get-SynthFeedTime -StepMs $script:step).Live
+        $from = $live - 3 * $script:step
+        @{ feed = @{ lastMs = $from } } | ConvertTo-Json | Set-Content -LiteralPath $script:feedState
+        $result = Invoke-SynthFeed -Feed $script:feedObjects -Inventory @{ hosts = @(); vms = @() } -Plan @{ objects = @() } -StatePath $script:feedState -StepMs $script:step -Cycles 1 -WarningAction SilentlyContinue
+        $result.failed | Should -Be 4
+        (Get-Content -LiteralPath $script:feedState -Raw | ConvertFrom-Json).feed.lastMs | Should -Be $from
+    }
+
+    It 'moves the last push on when only some objects fail' {
+        Mock -ModuleName VcfOpsSynth Invoke-SynthFeedEngine { foreach ($f in $Feed) { $r = [VcfOpsSynth.PushResult]::new(); $r.Key = $f.Spec.Key; if ($f.Spec.Key -eq 'vm-2') { $r.Status = 404; $r.Error = 'gone' }; $r } }
+        $live = (Get-SynthFeedTime -StepMs $script:step).Live
+        @{ feed = @{ lastMs = $live - $script:step } } | ConvertTo-Json | Set-Content -LiteralPath $script:feedState
+        $null = Invoke-SynthFeed -Feed $script:feedObjects -Inventory @{ hosts = @(); vms = @() } -Plan @{ objects = @() } -StatePath $script:feedState -StepMs $script:step -Cycles 1 -WarningAction SilentlyContinue
+        (Get-Content -LiteralPath $script:feedState -Raw | ConvertFrom-Json).feed.lastMs | Should -Be $live
+    }
+
     It 'pushes nothing with -WhatIf' {
         $null = Invoke-SynthFeed -Feed $script:feedObjects -Inventory @{ hosts = @(); vms = @() } -Plan @{ objects = @() } -StatePath $script:feedState -StepMs $script:step -Cycles 1 -WhatIf
         Should -Invoke -ModuleName VcfOpsSynth Invoke-SynthFeedEngine -Times 0 -Exactly

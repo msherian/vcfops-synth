@@ -575,10 +575,15 @@ function Invoke-SynthFeed {
         # A cheap call first, so an expired token is renewed before the engine uses it.
         $null = Invoke-SynthOpsRequest -Method Get -Path 'versions/current'
         $failed = 0
+        # The last push only moves on when some object took both the catch-up and the live point, so a cycle
+        # where every push failed (lab down, token refused) is retried over the same range next time.
+        $advance = $true
         if ($times.CatchUp.Count -and $times.Live -gt $last) {
             $r = @(Invoke-SynthFeedEngine -Feed $Feed -Time $times.CatchUp -StepMs $StepMs -TimeZone $TimeZone -Analytics $false -Concurrency $Concurrency)
             $summary.samples += ($r | Measure-Object -Property Samples -Sum).Sum
-            $failed += @($r | Where-Object Status -NE 0).Count
+            $bad = @($r | Where-Object Status -NE 0)
+            $failed += $bad.Count
+            if ($r.Count -and $bad.Count -eq $r.Count) { $advance = $false }
             Write-Verbose ('{0:HH:mm:ss}Z caught up {1} points' -f [DateTime]::UtcNow, $times.CatchUp.Count)
         }
         if ($times.Live -gt $last) {
@@ -586,8 +591,10 @@ function Invoke-SynthFeed {
             $summary.samples += ($r | Measure-Object -Property Samples -Sum).Sum
             $bad = @($r | Where-Object Status -NE 0)
             $failed += $bad.Count
+            if ($r.Count -and $bad.Count -eq $r.Count) { $advance = $false }
             foreach ($b in @($bad | Select-Object -First 3)) { Write-Warning "$($b.Key): $($b.Error)" }
-            Save-SynthStateSection -Path $StatePath -Section 'feed' -Value ([ordered]@{ lastMs = $times.Live; updatedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture) })
+            if ($advance) { Save-SynthStateSection -Path $StatePath -Section 'feed' -Value ([ordered]@{ lastMs = $times.Live; updatedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture) }) }
+            else { Write-Warning 'Every push in this cycle failed, so the same range is pushed again next cycle.' }
             $active = if ($scenarios.Count) { '; scenarios ' + (($scenarios | ForEach-Object { $_.id }) -join ', ') } else { '' }
             Write-Verbose ('{0:HH:mm:ss}Z pushed {1:u} for {2} objects, {3} failed{4}' -f [DateTime]::UtcNow, [DateTimeOffset]::FromUnixTimeMilliseconds($times.Live), $Feed.Count, $failed, $active)
         }
