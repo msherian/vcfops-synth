@@ -61,8 +61,8 @@
         -Command          the command (VCFOPS_SYNTH_COMMAND; default help)
         -ConfigPath       lab.json (VCFOPS_SYNTH_CONFIG; default /config/lab.json)
 
-    Signing in to VCF Operations (config, connect-test, plan, seed, backfill; the password only for
-    connect-test, seed and backfill):
+    Signing in to VCF Operations (config, connect-test, plan, seed, backfill, content; the password only for
+    connect-test, seed, backfill and content):
         -Fqdn             VCF Operations host name (VCFOPS_FQDN; default operations.fqdn)
         -Username         account (VCFOPS_USERNAME; default operations.username)
         -AuthSource       authentication source (VCFOPS_AUTHSOURCE; default operations.authSource)
@@ -82,9 +82,14 @@
         -AnonymisationKey key for stable IDs and pseudonyms, for runs that keep no state
                           (VCFOPS_SYNTH_ANON_KEY; default <paths.data>/anonymise.key)
 
+        content           Publishes the toolset's custom groups (one per tier, one per application from the
+                          tier rules, and the scenario targets), by name with the prefix; existing ones are updated.
+                          Membership follows the vcfops-synth|tier and |application properties seed writes.
+                          Tiered policies follow (Phase 5); alerts and dashboards in Phases 6 and 7.
+                          -DryRun        list what would be created or updated (VCFOPS_SYNTH_DRY_RUN)
+
     Commands still to come, by build phase:
         reset             Phase 3   Remove the objects seed created
-        content           Phase 5-7 Groups, policies, alerts, dashboards
         feed, scenario    Phase 6   Live metrics and scenario overlays
         live-load         Phase 9   Optional UPSA and load VMs
 
@@ -230,7 +235,6 @@ $toolVersion = (Import-PowerShellDataFile -Path $moduleRoot).ModuleVersion
 
 $planned = [ordered]@{
     'reset'     = 3
-    'content'   = 5
     'feed'      = 6
     'scenario'  = 6
     'live-load' = 9
@@ -245,20 +249,20 @@ $optionSpec = [ordered]@{
     NoAnonymise = @{ Env = 'VCFOPS_SYNTH_NO_ANONYMISE'; Type = 'switch'; Commands = @('import') }
     Adapter     = @{ Env = 'VCFOPS_SYNTH_ADAPTER'; Type = 'text'; Commands = @('seed', 'backfill') }
     Refresh     = @{ Env = 'VCFOPS_SYNTH_REFRESH'; Type = 'switch'; Commands = @('seed') }
-    DryRun      = @{ Env = 'VCFOPS_SYNTH_DRY_RUN'; Type = 'switch'; Commands = @('seed', 'backfill') }
+    DryRun      = @{ Env = 'VCFOPS_SYNTH_DRY_RUN'; Type = 'switch'; Commands = @('seed', 'backfill', 'content') }
     Days        = @{ Env = 'VCFOPS_SYNTH_DAYS'; Type = 'count'; Commands = @('backfill') }
     Kinds       = @{ Env = 'VCFOPS_SYNTH_KINDS'; Type = 'list'; Commands = @('backfill') }
     MaxVms      = @{ Env = 'VCFOPS_SYNTH_MAX_VMS'; Type = 'count'; Commands = @('backfill') }
     Concurrency = @{ Env = 'VCFOPS_SYNTH_CONCURRENCY'; Type = 'count'; Commands = @('backfill') }
     Restart     = @{ Env = 'VCFOPS_SYNTH_RESTART'; Type = 'switch'; Commands = @('backfill') }
     # The module reads these variables itself, so only a parameter is passed on ('module').
-    Fqdn             = @{ Env = 'VCFOPS_FQDN'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
-    Username         = @{ Env = 'VCFOPS_USERNAME'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
-    AuthSource       = @{ Env = 'VCFOPS_AUTHSOURCE'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
-    Password         = @{ Env = 'VCFOPS_PASSWORD'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
-    PasswordFile     = @{ Env = 'VCFOPS_PASSWORD_FILE'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
-    SecretName       = @{ Env = 'VCFOPS_SECRET_NAME'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
-    CredentialFile   = @{ Env = 'VCFOPS_CREDENTIAL_FILE'; Type = 'text'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
+    Fqdn             = @{ Env = 'VCFOPS_FQDN'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content') }
+    Username         = @{ Env = 'VCFOPS_USERNAME'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content') }
+    AuthSource       = @{ Env = 'VCFOPS_AUTHSOURCE'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content') }
+    Password         = @{ Env = 'VCFOPS_PASSWORD'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content') }
+    PasswordFile     = @{ Env = 'VCFOPS_PASSWORD_FILE'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content') }
+    SecretName       = @{ Env = 'VCFOPS_SECRET_NAME'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content') }
+    CredentialFile   = @{ Env = 'VCFOPS_CREDENTIAL_FILE'; Type = 'text'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content') }
     AnonymisationKey = @{ Env = 'VCFOPS_SYNTH_ANON_KEY'; Type = 'module'; Commands = @('import') }
 }
 
@@ -499,6 +503,23 @@ try {
             }
             foreach ($warning in $inventory.report.warnings) { Write-Host "Warning: $warning" }
             if (-not $anonymise) { Write-Host 'Real names were kept. Do not share this inventory outside the customer.' }
+            exit 0
+        }
+
+        'content' {
+            $config = Get-CliConfig
+            $inventory = Get-SynthInventory -Path $config.paths.inventory
+            $groups = @(Get-SynthGroupDefinition -Inventory $inventory -Prefix $config.prefix)
+            Write-Host "Content for $($config.operations.fqdn): $($groups.Count) custom groups"
+            $null = Connect-Cli -Config $config
+            try {
+                $results = @(Publish-SynthGroup -Definition $groups -Prefix $config.prefix -WhatIf:([bool]$options.DryRun))
+                foreach ($r in $results) { Write-Host ('  {0,-14} {1}' -f $r.Action, $r.Name) }
+                if ($options.DryRun) { Write-Host 'Dry run: nothing was changed.' }
+            }
+            finally {
+                Disconnect-SynthOps -Confirm:$false
+            }
             exit 0
         }
 

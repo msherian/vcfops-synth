@@ -49,9 +49,9 @@ Describe 'vcfops-synth CLI' {
     }
 
     It 'names the phase for a command not built yet' {
-        $result = Invoke-Cli @('content')
+        $result = Invoke-Cli @('feed')
         $result.ExitCode | Should -Be 3
-        $result.Output | Should -BeLike '*Phase 5*'
+        $result.Output | Should -BeLike '*Phase 6*'
     }
 
     It 'builds seed now, so it no longer reports Phase 3' {
