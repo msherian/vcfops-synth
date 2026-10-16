@@ -156,6 +156,14 @@ function New-SynthBackfillSpec {
         if (-not $numeric.Count) { continue }
         $item = $items[$object.key]
         $calibration = if ($item) { Get-SynthCalibration -Kind $object.kind -Item $item } else { @{} }
+        # Ops sums a VM's per-disk write throughput into the total, overwriting a pushed total, so the
+        # first disk carries the LiveOptics figure (read too, so the per-disk view agrees); other disks stay 0.
+        foreach ($total in 'virtualDisk|read_average', 'virtualDisk|write_average') {
+            if (-not $calibration.ContainsKey($total)) { continue }
+            $leaf = ($total -split '\|')[1]
+            $first = @($numeric | Where-Object { $_.key -match "^virtualDisk:[^|]+\|$([regex]::Escape($leaf))$" } | ForEach-Object key | Sort-Object)[0]
+            if ($first) { $calibration[$first] = $calibration[$total] }
+        }
         $spec = [VcfOpsSynth.ObjectSpec]::new()
         $spec.Key = $object.key
         $spec.ResourceId = $Ids[$object.key]
