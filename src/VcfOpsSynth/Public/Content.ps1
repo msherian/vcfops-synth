@@ -99,9 +99,14 @@ function Publish-SynthGroup {
     $page = 0
     do {
         $r = Invoke-SynthOpsRequest -Method Get -Path 'resources/groups' -Query @{ page = $page; pageSize = 1000 }
-        foreach ($g in @($r.groups)) { if ($g.resourceKey.name -like "$Prefix*") { $existing[$g.resourceKey.name] = $g } }
+        # The list may come without groups or pageInfo (the module runs under strict mode).
+        $field = { param($o, $name) if ($o -is [System.Collections.IDictionary]) { if ($o.Contains($name)) { $o[$name] } } elseif ($o -and $o.PSObject.Properties[$name]) { $o.$name } }
+        $groups = @(& $field $r 'groups')
+        foreach ($g in $groups) { if ($g -and $g.resourceKey.name -like "$Prefix*") { $existing[$g.resourceKey.name] = $g } }
+        $info = & $field $r 'pageInfo'
+        $total = if ($info) { [int](& $field $info 'totalCount') } else { 0 }
         $page++
-    } while ($r.pageInfo -and $page * 1000 -lt $r.pageInfo.totalCount)
+    } while ($groups.Count -and $page * 1000 -lt $total)
 
     foreach ($d in $Definition) {
         $policy = if ($d.Tier -and $PolicyByTier.ContainsKey($d.Tier)) { $PolicyByTier[$d.Tier] } else { $null }
