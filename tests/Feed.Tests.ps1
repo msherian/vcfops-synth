@@ -254,7 +254,19 @@ Describe 'Scenarios' {
         $feed[1].Overlays.Count | Should -BeGreaterThan 0
         $feed[2].Overlays.Count | Should -Be 0
         Set-SynthFeedOverlay -Feed $feed -Scenario @() -Inventory $script:inventory -Plan $script:plan
-        $feed[0].Overlays.Count | Should -Be 0
+        # An object with no overlays must hold an empty array, not $null, or the engine fails on every object.
+        foreach ($f in $feed) { $null -eq $f.Overlays | Should -BeFalse; $f.Overlays.Count | Should -Be 0 }
+    }
+
+    It 'builds a body when an object''s overlays or text keys are null' {
+        $o = New-TestObjectSpec -Series @(New-TestSeries -Key 'cpu|usage_average' -Mode Constant -A 5)
+        $f = [VcfOpsSynth.Feed]::Prepare($o, $script:start, $script:step, $script:points, 'Europe/Dublin')
+        $f.Overlays = $null
+        $f.TextKeys = $null
+        $samples = 0L
+        $body = [VcfOpsSynth.Feed]::Body($f, $script:week[0..0], $script:step, $script:tz, $true, [ref]$samples) | ConvertFrom-Json
+        @($body.'stat-content'.statKey) | Should -Be @('cpu|usage_average')
+        $samples | Should -Be 1
     }
 }
 

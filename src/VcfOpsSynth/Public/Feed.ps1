@@ -496,7 +496,8 @@ function Set-SynthFeedOverlay {
     }
     if (-not $PSCmdlet.ShouldProcess("$($Feed.Count) feed objects", 'Set scenario overlays')) { return }
     foreach ($f in $Feed) {
-        $f.Overlays = if ($all.ContainsKey($f.Spec.Key)) { [VcfOpsSynth.Overlay[]]$all[$f.Spec.Key].ToArray() } else { [VcfOpsSynth.Overlay[]]@() }
+        # Built inside @() so an object with no overlays gets an empty array, not $null (an empty array returned from if is unrolled).
+        $f.Overlays = [VcfOpsSynth.Overlay[]]@(if ($all.ContainsKey($f.Spec.Key)) { $all[$f.Spec.Key] })
     }
 }
 
