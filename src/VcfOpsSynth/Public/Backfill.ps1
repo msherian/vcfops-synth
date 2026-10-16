@@ -125,6 +125,7 @@ function Invoke-SynthBackfill {
     $clock = [Diagnostics.Stopwatch]::StartNew()
     for ($i = 0; $i -lt $todo.Count; $i += $BatchSize) {
         $batch = [VcfOpsSynth.ObjectSpec[]]@($todo[$i..([math]::Min($i + $BatchSize, $todo.Count) - 1)])
+        $batchStart = $clock.Elapsed
         # A cheap call first, so an expired token is renewed before the engine uses it.
         $null = Invoke-SynthOpsRequest -Method Get -Path 'versions/current'
         $outcome = @(Invoke-SynthBackfillEngine -Batch $batch -State $state -TimeZone $TimeZone -Concurrency $Concurrency -MaxSamplesPerCall $MaxSamplesPerCall)
@@ -150,7 +151,10 @@ function Invoke-SynthBackfill {
         $finished = [math]::Min($i + $BatchSize, $todo.Count)
         $rate = if ($clock.Elapsed.TotalSeconds -gt 0) { $result.samples / $clock.Elapsed.TotalSeconds } else { 0 }
         Write-Progress -Activity 'Backfilling history' -Status ('{0} of {1} objects, {2:N0} samples ({3:N0}/s)' -f $finished, $todo.Count, $result.samples, $rate) -PercentComplete ($finished / $todo.Count * 100)
-        Write-Verbose ('{0} of {1} objects, {2:N0} samples, {3:N0} samples/s' -f $finished, $todo.Count, $result.samples, $rate)
+        # Time of day, batch duration and an estimate of the rest, to see how each batch is going.
+        $batchSeconds = ($clock.Elapsed - $batchStart).TotalSeconds
+        $left = if ($finished) { [TimeSpan]::FromSeconds($clock.Elapsed.TotalSeconds / $finished * ($todo.Count - $finished)) } else { [TimeSpan]::Zero }
+        Write-Verbose ('{0:HH:mm:ss}Z {1} of {2} objects, {3:N0} samples, {4:N0} samples/s; batch {5:N1} s, about {6:hh\:mm\:ss} left' -f [DateTime]::UtcNow, $finished, $todo.Count, $result.samples, $rate, $batchSeconds, $left)
     }
     Write-Progress -Activity 'Backfilling history' -Completed
     $result.seconds = [int]$clock.Elapsed.TotalSeconds
