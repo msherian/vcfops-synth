@@ -42,4 +42,5 @@ ENV VCFOPS_SYNTH_CONFIG=/config/lab.json \
 USER synth
 VOLUME ["/config", "/data"]
 ENTRYPOINT ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", "/opt/vcfops-synth/bin/vcfops-synth.ps1"]
-CMD ["help"]
+# No default arguments, so VCFOPS_SYNTH_COMMAND can choose the command; with neither, the script shows help.
+CMD []
