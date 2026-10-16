@@ -111,7 +111,13 @@ jobs:
           docker run --rm -e VCFOPS_SYNTH_ANON_KEY=ci \
             -v "$PWD/config/lab.example.json:/config/lab.json:ro" \
             -v "$PWD/tests/fixtures/rvtools-4x:/data/rvtools:ro" \
-            "${{ env.IMAGE }}:pr-${{ github.event.number }}" import /data/rvtools --output /tmp/inventory.json
+            "${{ env.IMAGE }}:pr-${{ github.event.number }}" import /data/rvtools -Output /tmp/inventory.json
+          # The same import driven only by environment variables, as a scheduled container would run it.
+          docker run --rm -e VCFOPS_SYNTH_ANON_KEY=ci -e VCFOPS_SYNTH_COMMAND=import \
+            -e VCFOPS_SYNTH_SOURCE=/data/rvtools -e VCFOPS_SYNTH_OUTPUT=/tmp/inventory.json \
+            -v "$PWD/config/lab.example.json:/config/lab.json:ro" \
+            -v "$PWD/tests/fixtures/rvtools-4x:/data/rvtools:ro" \
+            "${{ env.IMAGE }}:pr-${{ github.event.number }}"
 
   dockerhub:
     # Off until the toolset is mature. To switch on: set the repository variable

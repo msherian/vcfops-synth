@@ -4,9 +4,13 @@ BeforeAll {
     $script:cli = Join-Path $PSScriptRoot '../bin/vcfops-synth.ps1'
     $script:example = Join-Path $PSScriptRoot '../config/lab.example.json'
 
+    # Runs the CLI as Docker does; Environment sets variables for that run only, as `docker run -e` would.
     function Invoke-Cli {
-        param([string[]]$CliArgs)
-        $output = & pwsh -NoProfile -NonInteractive -File $script:cli @CliArgs 2>&1
+        param([string[]]$CliArgs, [hashtable]$Environment = @{})
+        $saved = @{}
+        foreach ($name in $Environment.Keys) { $saved[$name] = [Environment]::GetEnvironmentVariable($name); [Environment]::SetEnvironmentVariable($name, $Environment[$name]) }
+        try { $output = & pwsh -NoProfile -NonInteractive -File $script:cli @CliArgs 2>&1 }
+        finally { foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) } }
         [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
     }
 }
@@ -45,22 +49,58 @@ Describe 'vcfops-synth CLI' {
     }
 
     It 'names the phase for a command not built yet' {
-        $result = Invoke-Cli @('backfill')
+        $result = Invoke-Cli @('content')
         $result.ExitCode | Should -Be 3
-        $result.Output | Should -BeLike '*Phase 4*'
+        $result.Output | Should -BeLike '*Phase 5*'
     }
 
     It 'builds seed now, so it no longer reports Phase 3' {
-        $result = Invoke-Cli @('seed', '--bogus')
+        $result = Invoke-Cli @('seed', '-Bogus')
         $result.ExitCode | Should -Be 2
-        $result.Output | Should -BeLike "*Unknown option '--bogus' for seed*"
+        $result.Output | Should -BeLike "*Unexpected argument(s) for 'seed': -Bogus*"
         $result.Output | Should -Not -BeLike '*not built yet*'
     }
 
-    It 'asks for an adapter name after --adapter' {
-        $result = Invoke-Cli @('seed', '--adapter')
+    It 'points the old --options at their PowerShell parameters' {
+        $result = Invoke-Cli @('backfill', '--dry-run', '--max-vms', '5')
         $result.ExitCode | Should -Be 2
-        $result.Output | Should -BeLike '*--adapter needs an adapter instance name*'
+        $result.Output | Should -BeLike '*--dry-run is now -DryRun*--max-vms is now -MaxVms*'
+    }
+
+    It 'refuses a parameter the command does not take' {
+        $result = Invoke-Cli @('config', '-Adapter', 'vc-01', '-ConfigPath', $script:example)
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike "*'config' does not take -Adapter*"
+    }
+
+    It 'checks numbers and switches, whether a parameter or a variable' {
+        $result = Invoke-Cli @('backfill', '-Days', 'thirty')
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike "*-Days needs a whole number of at least 1; got 'thirty'*"
+        $result = Invoke-Cli @('seed') -Environment @{ VCFOPS_SYNTH_DRY_RUN = 'maybe' }
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike "*VCFOPS_SYNTH_DRY_RUN must be true or false; got 'maybe'*"
+    }
+
+    It 'takes the command from VCFOPS_SYNTH_COMMAND, as a container would' {
+        $result = Invoke-Cli @() -Environment @{ VCFOPS_SYNTH_COMMAND = 'version' }
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match '^vcfops-synth \d+\.\d+\.\d+'
+    }
+
+    It 'takes the sign-in settings as parameters, and keeps the password out of commands that do not sign in' {
+        $result = Invoke-Cli @('config', '-Fqdn', 'ops-param.example.test', '-ConfigPath', $script:example) -Environment @{ VCFOPS_FQDN = 'ops-env.example.test' }
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -BeLike '*ops-param.example.test*'
+        $result.Output | Should -Not -BeLike '*ops-env.example.test*'
+        $result = Invoke-Cli @('config', '-SecretName', 'vcfops_password', '-ConfigPath', $script:example)
+        $result.ExitCode | Should -Be 2
+        $result.Output | Should -BeLike "*'config' does not take -SecretName*"
+    }
+
+    It 'ignores variables meant for other commands' {
+        $result = Invoke-Cli @('config', '-ConfigPath', $script:example) -Environment @{ VCFOPS_SYNTH_ADAPTER = 'vc-01'; VCFOPS_SYNTH_DAYS = 'not a number' }
+        $result.ExitCode | Should -Be 0
     }
 
     It 'rejects arguments a command does not take' {
@@ -91,9 +131,9 @@ Describe 'vcfops-synth CLI' {
             Test-Path (Join-Path $TestDrive 'data/anonymise.key') | Should -BeTrue
         }
 
-        It 'keeps real names with --no-anonymise and says so' {
+        It 'keeps real names with -NoAnonymise and says so' {
             $output = Join-Path $TestDrive 'named.json'
-            $result = Invoke-Cli @('import', $script:fixture, '--no-anonymise', '--output', $output, '-ConfigPath', $script:lab)
+            $result = Invoke-Cli @('import', $script:fixture, '-NoAnonymise', '-Output', $output, '-ConfigPath', $script:lab)
             $result.ExitCode | Should -Be 0
             $result.Output | Should -BeLike '*Real names were kept*'
             (Get-Content -Path $output -Raw) | Should -Match 'app-pay-01'
@@ -116,7 +156,7 @@ Describe 'vcfops-synth CLI' {
             $result.Output | Should -BeLike '*8 VMs (7 powered on) on 3 hosts*'
         }
 
-        It 'joins LiveOptics performance with --perf' -Skip:(-not (Get-Module -ListAvailable -Name ImportExcel)) {
+        It 'joins LiveOptics performance with -Performance' -Skip:(-not (Get-Module -ListAvailable -Name ImportExcel)) {
             Import-Module ImportExcel -WarningAction SilentlyContinue
             $perf = Join-Path $TestDrive 'liveoptics.xlsx'
             [pscustomobject]@{ 'VM Name' = 'app-pay-01'; 'MOB ID' = 'vm-1001'; 'Average vCPU %' = 30; 'Peak vCPU %' = 90 } |
@@ -124,15 +164,36 @@ Describe 'vcfops-synth CLI' {
             [pscustomobject]@{ Host = 'esx01.example.test'; 'Average CPU %' = 35; 'Peak CPU %' = 80 } |
                 Export-Excel -Path $perf -WorksheetName 'ESX Performance'
             $output = Join-Path $TestDrive 'with-perf.json'
-            $result = Invoke-Cli @('import', $script:fixture, '--perf', $perf, '--output', $output, '-ConfigPath', $script:lab)
+            $result = Invoke-Cli @('import', $script:fixture, '-Performance', $perf, '-Output', $output, '-ConfigPath', $script:lab)
             $result.ExitCode | Should -Be 0
             $result.Output | Should -BeLike '*Performance: LiveOptics for 1 of 8 VMs and 1 of 3 hosts*'
         }
 
         It 'rejects an unknown option' {
-            $result = Invoke-Cli @('import', '--frobnicate', '-ConfigPath', $script:lab)
+            $result = Invoke-Cli @('import', '-Frobnicate', '-ConfigPath', $script:lab)
             $result.ExitCode | Should -Be 2
-            $result.Output | Should -BeLike "*Unknown option '--frobnicate'*"
+            $result.Output | Should -BeLike "*Unexpected argument(s) for 'import': -Frobnicate*"
+        }
+
+        It 'takes the anonymisation key as -AnonymisationKey, the same as VCFOPS_SYNTH_ANON_KEY' {
+            $byParam = Join-Path $TestDrive 'key-param.json'
+            $byEnv = Join-Path $TestDrive 'key-env.json'
+            (Invoke-Cli @('import', $script:fixture, '-AnonymisationKey', 'k-1', '-Output', $byParam, '-ConfigPath', $script:lab)).ExitCode | Should -Be 0
+            (Invoke-Cli @('import', $script:fixture, '-Output', $byEnv, '-ConfigPath', $script:lab) -Environment @{ VCFOPS_SYNTH_ANON_KEY = 'k-1' }).ExitCode | Should -Be 0
+            $ids = { param($f) ((Get-Content $f -Raw | ConvertFrom-Json).vms | ForEach-Object id | Sort-Object) -join ',' }
+            & $ids $byParam | Should -Be (& $ids $byEnv)
+        }
+
+        It 'reads its paths from VCFOPS_SYNTH_* variables, and a parameter wins over its variable' {
+            $fromEnv = Join-Path $TestDrive 'from-env.json'
+            $result = Invoke-Cli @('import', '-ConfigPath', $script:lab) -Environment @{ VCFOPS_SYNTH_SOURCE = $script:fixture; VCFOPS_SYNTH_OUTPUT = $fromEnv; VCFOPS_SYNTH_NO_ANONYMISE = 'true' }
+            $result.ExitCode | Should -Be 0
+            (Get-Content -Path $fromEnv -Raw) | Should -Match 'app-pay-01'
+            $fromParam = Join-Path $TestDrive 'from-param.json'
+            $result = Invoke-Cli @('import', '-Output', $fromParam, '-ConfigPath', $script:lab) -Environment @{ VCFOPS_SYNTH_SOURCE = $script:fixture; VCFOPS_SYNTH_OUTPUT = (Join-Path $TestDrive 'not-this.json') }
+            $result.ExitCode | Should -Be 0
+            Test-Path $fromParam | Should -BeTrue
+            Test-Path (Join-Path $TestDrive 'not-this.json') | Should -BeFalse
         }
 
         It 'fails clearly when the export is missing' {

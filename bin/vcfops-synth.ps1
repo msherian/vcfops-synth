@@ -6,9 +6,14 @@
     Builds a synthetic estate in VCF Operations from an RVTools export and pushes
     history, live metrics and Day-2 content to it through the Suite API. The image
     runs this script as its entrypoint, so the first argument to `docker run` is the
-    command:
+    command and the rest are its parameters:
 
-        docker run --rm -v ./config:/config -e VCFOPS_PASSWORD ghcr.io/msherian/vcfops-synth <command>
+        docker run --rm -v ./config:/config -e VCFOPS_PASSWORD ghcr.io/msherian/vcfops-synth seed -DryRun
+
+    Every parameter can also come from an environment variable, which suits the
+    container: VCFOPS_SYNTH_<NAME> (shown with each parameter below). A parameter on
+    the command line wins over its variable, which wins over lab.json. Switches take
+    true/false, yes/no, on/off or 1/0 in a variable.
 
     Commands available now:
         help              This text.
@@ -16,58 +21,192 @@
         config            Validates lab.json and prints the merged settings (password never shown).
         connect-test      Signs in to VCF Operations and prints its version.
         plan              Validates settings and lists what each stage will do. Dry run.
-        import [source]   Reads an RVTools export into the inventory model.
-                          source: an .xlsx, or a folder of RVTools CSV files
-                          (default import.source in lab.json).
-                          --output <path>    where to write the model (default paths.inventory)
-                          --tiering <path>   tiering rules (default import.tiering)
-                          --perf <path>      LiveOptics VMware workbook: per-VM and per-host
-                                             averages and peaks (default import.performance)
-                          --no-anonymise     keep real names; only for exports you may share as is
+        import [-Source] <path>
+                          Reads an RVTools export into the inventory model.
+                          -Source        an .xlsx, or a folder of RVTools CSV files
+                                         (VCFOPS_SYNTH_SOURCE; default import.source)
+                          -Output        where to write the model (VCFOPS_SYNTH_OUTPUT; default paths.inventory)
+                          -Tiering       tiering rules (VCFOPS_SYNTH_TIERING; default import.tiering)
+                          -Performance   LiveOptics VMware workbook: per-VM and per-host averages and peaks
+                                         (VCFOPS_SYNTH_PERFORMANCE; default import.performance)
+                          -NoAnonymise   keep real names; only for exports you may share as is
+                                         (VCFOPS_SYNTH_NO_ANONYMISE; default: import.anonymise)
         seed              Creates the inventory in VCF Operations under a vCenter adapter instance,
                           foundations first: an optional Physical Data Center (seed.physicalDatacenter),
                           datacenters, clusters, datastores, hosts, distributed and standard switches,
                           port groups, VM folders and VMs. Objects keep their inventory names and carry
-                          the seed.tag vSphere tag; VMWARE kinds get every metric and property of their
-                          rubric. Standard switches and port groups go under the toolset's adapter kind.
+                          the seed.tag and project vSphere tags; values come from the inventory only.
+                          Standard switches and port groups go under the toolset's adapter kind.
                           Every relationship is worked out first, datacenters go under the vCenter, and
                           objects that already exist (by identifier) are skipped.
-                          --adapter <name>   vCenter adapter instance (default seed.adapterInstance)
-                          --dry-run          build and summarise the plan; create nothing
-                          --refresh          also push planned properties and current stats to objects already there
+                          -Adapter       vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          -Refresh       also push planned properties and current stats to objects already there
+                                         (VCFOPS_SYNTH_REFRESH)
+                          -DryRun        build and summarise the plan; create nothing (VCFOPS_SYNTH_DRY_RUN)
+        backfill          Pushes backfillDays of history at intervalMinutes for every numeric stat key of the
+                          seeded objects, with analytics processing off. Keys with LiveOptics figures match
+                          their average and peak; the rest follow each object's workload curve around its
+                          current value, grow (space in use), stay flat (capacity) or stay at zero. A host,
+                          cluster or datastore follows the sum of its VMs' curves. Resumes from paths.state.
+                          -Adapter       vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          -Days          days of history (VCFOPS_SYNTH_DAYS; default backfillDays)
+                          -Kinds         only these kinds, comma-separated: VirtualMachine,HostSystem,...
+                                         (VCFOPS_SYNTH_KINDS)
+                          -MaxVms        only the first n VMs by key, for a pilot (VCFOPS_SYNTH_MAX_VMS)
+                          -Concurrency   objects posted at once (VCFOPS_SYNTH_CONCURRENCY; default 4)
+                          -Restart       forget saved progress and start over on a new range (VCFOPS_SYNTH_RESTART)
+                          -DryRun        count objects, series and samples; push nothing (VCFOPS_SYNTH_DRY_RUN)
+
+    Every command:
+        -Command          the command (VCFOPS_SYNTH_COMMAND; default help)
+        -ConfigPath       lab.json (VCFOPS_SYNTH_CONFIG; default /config/lab.json)
+
+    Signing in to VCF Operations (config, connect-test, plan, seed, backfill; the password only for
+    connect-test, seed and backfill):
+        -Fqdn             VCF Operations host name (VCFOPS_FQDN; default operations.fqdn)
+        -Username         account (VCFOPS_USERNAME; default operations.username)
+        -AuthSource       authentication source (VCFOPS_AUTHSOURCE; default operations.authSource)
+        -Password         the password (VCFOPS_PASSWORD). On a command line it shows in process lists
+                          and shell history; prefer one of the two below.
+        -PasswordFile     a file holding the password (VCFOPS_PASSWORD_FILE)
+        -SecretName       a Docker secret holding the password, read from /run/secrets/<name>
+                          (VCFOPS_SECRET_NAME)
+        A parameter wins over every variable; the password beats the file, which beats the secret.
+
+    import also takes:
+        -AnonymisationKey key for stable IDs and pseudonyms, for runs that keep no state
+                          (VCFOPS_SYNTH_ANON_KEY; default <paths.data>/anonymise.key)
 
     Commands still to come, by build phase:
         reset             Phase 3   Remove the objects seed created
-        backfill          Phase 4   Push generated history
         content           Phase 5-7 Groups, policies, alerts, dashboards
         feed, scenario    Phase 6   Live metrics and scenario overlays
         live-load         Phase 9   Optional UPSA and load VMs
 
 .PARAMETER Command
-    The command to run. Defaults to help.
+    The command to run. Defaults to $env:VCFOPS_SYNTH_COMMAND, then help.
+
+.PARAMETER Source
+    import: the RVTools export (an .xlsx, or a folder of CSV files). VCFOPS_SYNTH_SOURCE.
 
 .PARAMETER ConfigPath
     Path to lab.json. Defaults to $env:VCFOPS_SYNTH_CONFIG, then /config/lab.json.
 
-.PARAMETER Arguments
-    Further arguments for the command.
+.PARAMETER Output
+    import: where to write the inventory model. VCFOPS_SYNTH_OUTPUT.
+
+.PARAMETER Tiering
+    import: the tiering rules file. VCFOPS_SYNTH_TIERING.
+
+.PARAMETER Performance
+    import: the LiveOptics VMware workbook. VCFOPS_SYNTH_PERFORMANCE.
+
+.PARAMETER NoAnonymise
+    import: keep real names. VCFOPS_SYNTH_NO_ANONYMISE.
+
+.PARAMETER Adapter
+    seed, backfill: the vCenter adapter instance. VCFOPS_SYNTH_ADAPTER.
+
+.PARAMETER Refresh
+    seed: push planned properties and stats to objects already there. VCFOPS_SYNTH_REFRESH.
+
+.PARAMETER DryRun
+    seed, backfill: report what would be done; change nothing. VCFOPS_SYNTH_DRY_RUN.
+
+.PARAMETER Days
+    backfill: days of history. VCFOPS_SYNTH_DAYS.
+
+.PARAMETER Kinds
+    backfill: only these resource kinds, comma-separated. VCFOPS_SYNTH_KINDS.
+
+.PARAMETER MaxVms
+    backfill: only the first n VMs. VCFOPS_SYNTH_MAX_VMS.
+
+.PARAMETER Concurrency
+    backfill: objects posted at once. VCFOPS_SYNTH_CONCURRENCY.
+
+.PARAMETER Restart
+    backfill: forget saved progress. VCFOPS_SYNTH_RESTART.
+
+.PARAMETER Fqdn
+    VCF Operations host name. VCFOPS_FQDN.
+
+.PARAMETER Username
+    Account to sign in with. VCFOPS_USERNAME.
+
+.PARAMETER AuthSource
+    Authentication source. VCFOPS_AUTHSOURCE.
+
+.PARAMETER Password
+    The password, as text or a SecureString. VCFOPS_PASSWORD. Prefer -PasswordFile or -SecretName.
+
+.PARAMETER PasswordFile
+    A file holding the password. VCFOPS_PASSWORD_FILE.
+
+.PARAMETER SecretName
+    A Docker secret holding the password (/run/secrets/<name>). VCFOPS_SECRET_NAME.
+
+.PARAMETER AnonymisationKey
+    import: key for stable IDs and pseudonyms. VCFOPS_SYNTH_ANON_KEY.
+
+.PARAMETER Unrecognised
+    Anything else on the command line; refused with exit code 2.
 
 .EXAMPLE
     pwsh ./bin/vcfops-synth.ps1 config -ConfigPath ./config/lab.json
 
+.EXAMPLE
+    pwsh ./bin/vcfops-synth.ps1 backfill -Kinds VirtualMachine -MaxVms 25 -ConfigPath ./config/lab.json
+
+.EXAMPLE
+    docker run --rm -v ./config:/config -v ./data:/data -e VCFOPS_PASSWORD -e VCFOPS_SYNTH_DRY_RUN=true ghcr.io/msherian/vcfops-synth seed
+
+.EXAMPLE
+    docker service create --secret vcfops_password -e VCFOPS_SECRET_NAME=vcfops_password ... ghcr.io/msherian/vcfops-synth backfill
+
 .NOTES
-    Exit codes: 0 success, 1 failure, 2 unknown command or unexpected arguments,
+    Exit codes: 0 success, 1 failure, 2 unknown command, parameter or value,
     3 command not built yet.
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Parameters are read through PSBoundParameters by Resolve-CliOption.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '', Justification = 'pwsh -File passes text; Get-SynthSecret turns it into a SecureString at once, and the help steers to -PasswordFile and -SecretName.')]
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [string]$Command = 'help',
+    [string]$Command = $(if ($env:VCFOPS_SYNTH_COMMAND) { $env:VCFOPS_SYNTH_COMMAND } else { 'help' }),
+
+    [Parameter(Position = 1)]
+    [string]$Source,
 
     [string]$ConfigPath = $(if ($env:VCFOPS_SYNTH_CONFIG) { $env:VCFOPS_SYNTH_CONFIG } else { '/config/lab.json' }),
 
+    [string]$Output,
+    [string]$Tiering,
+    [Alias('Perf')][string]$Performance,
+    [Alias('NoAnonymize')][switch]$NoAnonymise,
+
+    [string]$Adapter,
+    [switch]$Refresh,
+    [switch]$DryRun,
+
+    # Numbers are taken as text and checked here, so a bad value is exit code 2, not a binding failure.
+    [string]$Days,
+    [string[]]$Kinds,
+    [string]$MaxVms,
+    [string]$Concurrency,
+    [switch]$Restart,
+
+    [string]$Fqdn,
+    [string]$Username,
+    [string]$AuthSource,
+    # Text from pwsh -File, or a SecureString when the script is called from PowerShell.
+    [object]$Password,
+    [string]$PasswordFile,
+    [string]$SecretName,
+    [Alias('AnonKey')][string]$AnonymisationKey,
+
     [Parameter(ValueFromRemainingArguments)]
-    [string[]]$Arguments
+    [string[]]$Unrecognised
 )
 
 Set-StrictMode -Version Latest
@@ -79,11 +218,35 @@ $toolVersion = (Import-PowerShellDataFile -Path $moduleRoot).ModuleVersion
 
 $planned = [ordered]@{
     'reset'     = 3
-    'backfill'  = 4
     'content'   = 5
     'feed'      = 6
     'scenario'  = 6
     'live-load' = 9
+}
+
+# Each command parameter: its environment variable, its type, and the commands that take it.
+$optionSpec = [ordered]@{
+    Source      = @{ Env = 'VCFOPS_SYNTH_SOURCE'; Type = 'text'; Commands = @('import') }
+    Output      = @{ Env = 'VCFOPS_SYNTH_OUTPUT'; Type = 'text'; Commands = @('import') }
+    Tiering     = @{ Env = 'VCFOPS_SYNTH_TIERING'; Type = 'text'; Commands = @('import') }
+    Performance = @{ Env = 'VCFOPS_SYNTH_PERFORMANCE'; Type = 'text'; Commands = @('import') }
+    NoAnonymise = @{ Env = 'VCFOPS_SYNTH_NO_ANONYMISE'; Type = 'switch'; Commands = @('import') }
+    Adapter     = @{ Env = 'VCFOPS_SYNTH_ADAPTER'; Type = 'text'; Commands = @('seed', 'backfill') }
+    Refresh     = @{ Env = 'VCFOPS_SYNTH_REFRESH'; Type = 'switch'; Commands = @('seed') }
+    DryRun      = @{ Env = 'VCFOPS_SYNTH_DRY_RUN'; Type = 'switch'; Commands = @('seed', 'backfill') }
+    Days        = @{ Env = 'VCFOPS_SYNTH_DAYS'; Type = 'count'; Commands = @('backfill') }
+    Kinds       = @{ Env = 'VCFOPS_SYNTH_KINDS'; Type = 'list'; Commands = @('backfill') }
+    MaxVms      = @{ Env = 'VCFOPS_SYNTH_MAX_VMS'; Type = 'count'; Commands = @('backfill') }
+    Concurrency = @{ Env = 'VCFOPS_SYNTH_CONCURRENCY'; Type = 'count'; Commands = @('backfill') }
+    Restart     = @{ Env = 'VCFOPS_SYNTH_RESTART'; Type = 'switch'; Commands = @('backfill') }
+    # The module reads these variables itself, so only a parameter is passed on ('module').
+    Fqdn             = @{ Env = 'VCFOPS_FQDN'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
+    Username         = @{ Env = 'VCFOPS_USERNAME'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
+    AuthSource       = @{ Env = 'VCFOPS_AUTHSOURCE'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
+    Password         = @{ Env = 'VCFOPS_PASSWORD'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
+    PasswordFile     = @{ Env = 'VCFOPS_PASSWORD_FILE'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
+    SecretName       = @{ Env = 'VCFOPS_SECRET_NAME'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill') }
+    AnonymisationKey = @{ Env = 'VCFOPS_SYNTH_ANON_KEY'; Type = 'module'; Commands = @('import') }
 }
 
 function Show-Help {
@@ -103,61 +266,100 @@ function ConvertTo-RedactedConfig {
     $copy
 }
 
-# Commands that read their own arguments; every other built command refuses them rather than ignore a typo.
-$takesArguments = @('import', 'seed')
-
-function Read-ImportArgument {
-    param([string[]]$Argument)
-    # Plain 'import' passes no arguments at all, and StrictMode refuses .Count on $null.
-    if (-not $Argument) { $Argument = @() }
-    $parsed = @{ Source = $null; Output = $null; Tiering = $null; Perf = $null; Anonymise = $null }
-    for ($i = 0; $i -lt $Argument.Count; $i++) {
-        $arg = $Argument[$i]
-        switch -Regex ($arg) {
-            '^--(output|tiering|perf)$' {
-                if ($i + 1 -ge $Argument.Count) { throw [System.ArgumentException]::new("$arg needs a path.") }
-                $parsed[(Get-Culture).TextInfo.ToTitleCase($Matches[1])] = $Argument[++$i]
-                break
+function Resolve-CliOption {
+    <#
+        The options for one command: each from its parameter when given, else its
+        environment variable, else $null (the command falls back to lab.json).
+        A parameter the command does not take, or a value of the wrong kind, is an
+        ArgumentException, which the caller turns into exit code 2. Variables for
+        other commands are ignored, since a container may set several.
+    #>
+    param([string]$Name, [hashtable]$Bound)
+    $options = @{}
+    foreach ($key in $optionSpec.Keys) {
+        $spec = $optionSpec[$key]
+        $takes = $Name -in $spec.Commands
+        if ($Bound.ContainsKey($key) -and -not $takes) {
+            # A stray word after a command lands in the positional -Source.
+            if ($key -eq 'Source') { throw [System.ArgumentException]::new("'$Name' takes no further arguments; got: $($Bound[$key]).") }
+            throw [System.ArgumentException]::new("'$Name' does not take -$key.")
+        }
+        if (-not $takes) { continue }
+        if ($spec.Type -eq 'module') { $options[$key] = if ($Bound.ContainsKey($key)) { $Bound[$key] } else { $null }; continue }
+        $raw = $null
+        $from = ''
+        if ($Bound.ContainsKey($key)) { $raw = $Bound[$key]; $from = "-$key" }
+        elseif ([Environment]::GetEnvironmentVariable($spec.Env)) { $raw = [Environment]::GetEnvironmentVariable($spec.Env); $from = $spec.Env }
+        if ($null -eq $raw) { $options[$key] = $null; continue }
+        $options[$key] = switch ($spec.Type) {
+            'switch' {
+                if ($raw -is [System.Management.Automation.SwitchParameter] -or $raw -is [bool]) { [bool]$raw }
+                elseif ("$raw" -match '^(?i:true|yes|on|1)$') { $true }
+                elseif ("$raw" -match '^(?i:false|no|off|0)$') { $false }
+                else { throw [System.ArgumentException]::new("$from must be true or false; got '$raw'.") }
             }
-            '^--no-anonymi[sz]e$' { $parsed.Anonymise = $false; break }
-            '^--anonymi[sz]e$' { $parsed.Anonymise = $true; break }
-            '^-' { throw [System.ArgumentException]::new("Unknown option '$arg' for import.") }
-            default {
-                if ($parsed.Source) { throw [System.ArgumentException]::new("import takes one source; got '$($parsed.Source)' and '$arg'.") }
-                $parsed.Source = $arg
+            'count' {
+                if ("$raw" -notmatch '^\d+$' -or [int]"$raw" -lt 1) { throw [System.ArgumentException]::new("$from needs a whole number of at least 1; got '$raw'.") }
+                [int]"$raw"
             }
+            'list' { , @(@($raw) -join ',' -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+            default { [string]$raw }
         }
     }
-    $parsed
+    $options
 }
 
-function Read-SeedArgument {
-    param([string[]]$Argument)
-    if (-not $Argument) { $Argument = @() }
-    $parsed = @{ Adapter = $null; DryRun = $false; Refresh = $false }
-    for ($i = 0; $i -lt $Argument.Count; $i++) {
-        $arg = $Argument[$i]
-        switch -Regex ($arg) {
-            '^--adapter$' {
-                if ($i + 1 -ge $Argument.Count) { throw [System.ArgumentException]::new("$arg needs an adapter instance name.") }
-                $parsed.Adapter = $Argument[++$i]
-                break
-            }
-            '^--dry-run$' { $parsed.DryRun = $true; break }
-            '^--refresh$' { $parsed.Refresh = $true; break }
-            default { throw [System.ArgumentException]::new("Unknown option '$arg' for seed.") }
-        }
-    }
-    $parsed
+function Get-CliOption {
+    # An option of the current command, or $null when the command does not take it.
+    param([string]$Name)
+    if ($options.ContainsKey($Name)) { $options[$Name] } else { $null }
+}
+
+function Get-CliConfig {
+    # lab.json with the sign-in parameters given on the command line on top.
+    param([switch]$SkipValidation)
+    Get-SynthConfig -Path $ConfigPath -Fqdn (Get-CliOption 'Fqdn') -Username (Get-CliOption 'Username') -AuthSource (Get-CliOption 'AuthSource') -SkipValidation:$SkipValidation
+}
+
+function Connect-Cli {
+    # Signs in with -Password, -PasswordFile or -SecretName when given, else the environment's.
+    param($Config)
+    $secret = Get-SynthSecret -Password (Get-CliOption 'Password') -PasswordFile (Get-CliOption 'PasswordFile') -SecretName (Get-CliOption 'SecretName')
+    Connect-SynthOps -Config $Config -Password $secret
+}
+
+function New-CliSeedPlan {
+    # The seed plan both seed and backfill work from, with the synthetic and project tags.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds a plan in memory.')]
+    param($Config, $Inventory, $Rubrics, $Target)
+    # The synthetic marker, then the project: seed.project, else the project folder the import came from.
+    $tags = @(@{ Category = $Config.seed.tag.category; Name = $Config.seed.tag.name })
+    $project = if ($Config.seed.project) { $Config.seed.project } elseif ($Inventory.source -and $Inventory.source.Contains('project')) { $Inventory.source.project } else { $null }
+    if ($project) { $tags += @{ Category = 'Project'; Name = $project } }
+    $plan = New-SynthSeedPlan -Inventory $Inventory -Rubric $Rubrics -VcId $Target.VcId -Prefix $Config.seed.prefix -Tag $tags -CustomAdapterKind $Config.adapterKind.key -PhysicalDatacenter $Config.seed.physicalDatacenter
+    @{ Plan = $plan; Tags = $tags }
 }
 
 try {
-    if ($Arguments -and $Command.ToLowerInvariant() -notin $planned.Keys -and $Command.ToLowerInvariant() -notin $takesArguments) {
-        Write-Host "'$Command' takes no further arguments; got: $($Arguments -join ' '). Run 'help' for usage."
+    if ($Unrecognised) {
+        # The old --kebab-case options read as their PowerShell names, so say which one was meant.
+        $hints = @($Unrecognised | Where-Object { $_ -match '^--?[a-z][a-z-]*$' } | ForEach-Object {
+                $name = (($_ -replace '^-+', '') -split '-' | ForEach-Object { if ($_) { $_.Substring(0, 1).ToUpperInvariant() + $_.Substring(1) } }) -join ''
+                $known = @($optionSpec.Keys | Where-Object { $_ -ieq $name -or ($name -ieq 'Perf' -and $_ -eq 'Performance') -or ($name -ieq 'NoAnonymize' -and $_ -eq 'NoAnonymise') })
+                if ($known.Count) { "$_ is now -$($known[0])" }
+            })
+        $hint = if ($hints.Count) { " ($($hints -join '; '))" } else { '' }
+        Write-Host "Unexpected argument(s) for '$Command': $($Unrecognised -join ' ')$hint. Run 'help' for usage."
+        exit 2
+    }
+    $commandName = $Command.ToLowerInvariant()
+    try { $options = Resolve-CliOption -Name $commandName -Bound $PSBoundParameters }
+    catch [System.ArgumentException] {
+        Write-Host "$($_.Exception.Message) Run 'help' for usage."
         exit 2
     }
 
-    switch ($Command.ToLowerInvariant()) {
+    switch ($commandName) {
         { $_ -in 'help', '-h', '--help' } {
             Show-Help
             exit 0
@@ -169,7 +371,7 @@ try {
         }
 
         'config' {
-            $config = Get-SynthConfig -Path $ConfigPath -SkipValidation
+            $config = Get-CliConfig -SkipValidation
             ConvertTo-RedactedConfig -Config $config | ConvertTo-Json -Depth 10 | Write-Host
             $problems = @(Test-SynthConfig -Config $config)
             if ($problems.Count -gt 0) {
@@ -184,8 +386,8 @@ try {
         }
 
         'connect-test' {
-            $config = Get-SynthConfig -Path $ConfigPath
-            $session = Connect-SynthOps -Config $config
+            $config = Get-CliConfig
+            $session = Connect-Cli -Config $config
             $version = Get-SynthOpsVersion
             $release = if ($version.PSObject.Properties['releaseName']) { $version.releaseName } else { $version | ConvertTo-Json -Compress }
             Write-Host "Signed in to $($config.operations.fqdn) as $($config.operations.username)."
@@ -196,7 +398,7 @@ try {
         }
 
         'plan' {
-            $config = Get-SynthConfig -Path $ConfigPath
+            $config = Get-CliConfig
             $samplesPerObject = [int]($config.backfillDays * 24 * 60 / $config.intervalMinutes)
             Write-Host "Target:      https://$($config.operations.fqdn) as $($config.operations.username) ($($config.operations.authSource))"
             Write-Host "Adapter:     $($config.adapterKind.key) ('$($config.adapterKind.name)'), objects prefixed '$($config.prefix)'"
@@ -218,15 +420,10 @@ try {
         }
 
         'import' {
-            try { $options = Read-ImportArgument -Argument $Arguments }
-            catch [System.ArgumentException] {
-                Write-Host "$($_.Exception.Message) Run 'help' for usage."
-                exit 2
-            }
-            $config = Get-SynthConfig -Path $ConfigPath
+            $config = Get-CliConfig
             $source = if ($options.Source) { $options.Source } else { $config.import.source }
             $output = if ($options.Output) { $options.Output } else { $config.paths.inventory }
-            $anonymise = if ($null -ne $options.Anonymise) { $options.Anonymise } else { $config.import.anonymise }
+            $anonymise = if ($null -ne $options.NoAnonymise) { -not $options.NoAnonymise } else { $config.import.anonymise }
 
             $tieringPath = if ($options.Tiering) { $options.Tiering } else { $config.import.tiering }
             if ($options.Tiering -and -not (Test-Path -LiteralPath $tieringPath)) {
@@ -237,10 +434,10 @@ try {
             }
             $rules = Get-SynthTieringRule -Path $tieringPath
 
-            $perfPath = if ($options.Perf) { $options.Perf } else { $config.import.performance }
+            $perfPath = if ($options.Performance) { $options.Performance } else { $config.import.performance }
             $perfData = if ($perfPath) { Read-SynthLiveOptics -Path $perfPath } else { $null }
 
-            $key = Get-SynthAnonymisationKey -DataPath $config.paths.data
+            $key = Get-SynthAnonymisationKey -DataPath $config.paths.data -Key (Get-CliOption 'AnonymisationKey')
             $inventory = Import-SynthRvtools -Path $source -Key $key -TieringRules $rules -Anonymise:$anonymise -Performance $perfData
             Save-SynthInventory -Inventory $inventory -Path $output
 
@@ -257,27 +454,19 @@ try {
         }
 
         'seed' {
-            try { $options = Read-SeedArgument -Argument $Arguments }
-            catch [System.ArgumentException] {
-                Write-Host "$($_.Exception.Message) Run 'help' for usage."
-                exit 2
-            }
-            $config = Get-SynthConfig -Path $ConfigPath
+            $config = Get-CliConfig
             $adapterName = if ($options.Adapter) { $options.Adapter } else { $config.seed.adapterInstance }
-            if (-not $adapterName) { throw 'No vCenter adapter instance to seed under. Set seed.adapterInstance in lab.json or pass --adapter <name>.' }
+            if (-not $adapterName) { throw 'No vCenter adapter instance to seed under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
             $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
             $inventory = Get-SynthInventory -Path $config.paths.inventory
             $rubrics = Get-SynthRubric -Path $rubricPath
 
-            $null = Connect-SynthOps -Config $config
+            $null = Connect-Cli -Config $config
             try {
                 $target = Resolve-SynthSeedTarget -Name $adapterName
-                # The synthetic marker, then the project: seed.project, else the project folder the import came from.
-                $tags = @(@{ Category = $config.seed.tag.category; Name = $config.seed.tag.name })
-                $project = if ($config.seed.project) { $config.seed.project } elseif ($inventory.source -and $inventory.source.Contains('project')) { $inventory.source.project } else { $null }
-                if ($project) { $tags += @{ Category = 'Project'; Name = $project } }
-                $plan = New-SynthSeedPlan -Inventory $inventory -Rubric $rubrics -VcId $target.VcId -Prefix $config.seed.prefix -Tag $tags -CustomAdapterKind $config.adapterKind.key -PhysicalDatacenter $config.seed.physicalDatacenter
-                Write-Host "Tags: $(($tags | ForEach-Object { "$($_.Category): $($_.Name)" }) -join '; ')"
+                $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target
+                $plan = $built.Plan
+                Write-Host "Tags: $(($built.Tags | ForEach-Object { "$($_.Category): $($_.Name)" }) -join '; ')"
                 $objects = @($plan.objects)
                 Write-Host "Seed plan for adapter instance $adapterName ($($target.AdapterInstanceId)), vCenter $($target.VcId):"
                 $objects | Group-Object { $_.kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count)" }
@@ -304,6 +493,58 @@ try {
             }
             # Stale names mean Ops does not match the plan, so later phases should not carry on as if it did.
             exit $(if ($result.failed.Count -or $result.renamed.Count) { 1 } else { 0 })
+        }
+
+        'backfill' {
+            $config = Get-CliConfig
+            $adapterName = if ($options.Adapter) { $options.Adapter } else { $config.seed.adapterInstance }
+            if (-not $adapterName) { throw 'No vCenter adapter instance to backfill under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
+            $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
+            $inventory = Get-SynthInventory -Path $config.paths.inventory
+            $rubrics = Get-SynthRubric -Path $rubricPath
+            $days = if ($options.Days) { $options.Days } else { $config.backfillDays }
+            $range = Get-SynthBackfillRange -Days $days -IntervalMinutes $config.intervalMinutes
+
+            $null = Connect-Cli -Config $config
+            try {
+                $target = Resolve-SynthSeedTarget -Name $adapterName
+                $plan = (New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target).Plan
+                if ($options.Kinds) {
+                    $unknown = @($options.Kinds | Where-Object { $_ -notin @($plan.objects | ForEach-Object { $_.kind }) })
+                    if ($unknown.Count) { Write-Host "No planned objects of kind $($unknown -join ', '). Run 'help' for usage."; exit 2 }
+                    $plan.objects = @($plan.objects | Where-Object { $_.kind -in $options.Kinds })
+                }
+                if ($options.MaxVms) {
+                    $keep = @($plan.objects | Where-Object { $_.kind -eq 'VirtualMachine' } | Sort-Object { $_.key } | Select-Object -First $options.MaxVms | ForEach-Object { $_.key })
+                    $plan.objects = @($plan.objects | Where-Object { $_.kind -ne 'VirtualMachine' -or $_.key -in $keep })
+                }
+                $ids = Resolve-SynthPlanId -Plan $plan -AdapterInstanceId $target.AdapterInstanceId
+                $missing = @($plan.objects | Where-Object { -not $ids.ContainsKey($_.key) }).Count
+                $spec = @(New-SynthBackfillSpec -Plan $plan -Inventory $inventory -Ids $ids)
+                $series = ($spec | ForEach-Object { $_.Series.Count } | Measure-Object -Sum).Sum
+                $samples = [long]$series * $range.Points
+                $from = [DateTimeOffset]::FromUnixTimeMilliseconds($range.StartMs).ToString('u')
+                $to = [DateTimeOffset]::FromUnixTimeMilliseconds($range.EndMs).ToString('u')
+                Write-Host "Backfill for adapter instance ${adapterName}: $days days at $($config.intervalMinutes) minutes, $from to $to ($($range.Points) points)"
+                $spec | Group-Object { ($plan.objects | Where-Object key -eq $_.Key | Select-Object -First 1).kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count) objects, $(($_.Group | ForEach-Object { $_.Series.Count } | Measure-Object -Sum).Sum) series" }
+                Write-Host ('  {0} objects, {1:N0} series, {2:N0} samples (about {3:N1} GB of JSON)' -f $spec.Count, $series, $samples, ($samples * 19 / 1e9))
+                if ($missing) { Write-Host "  $missing planned objects are not in Operations; run seed first. They are skipped." }
+                if ($options.DryRun) {
+                    Write-Host 'Dry run: nothing was pushed.'
+                    exit 0
+                }
+                if ($options.Restart -and (Test-Path -LiteralPath $config.paths.state)) {
+                    $state = Get-Content -LiteralPath $config.paths.state -Raw | ConvertFrom-Json -AsHashtable
+                    if ($state -and $state.ContainsKey('backfill')) { $state.Remove('backfill'); $state | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $config.paths.state -Encoding utf8 }
+                }
+                $result = Invoke-SynthBackfill -Spec $spec -Range $range -StatePath $config.paths.state -TimeZone $config.timeZone -Concurrency $(if ($options.Concurrency) { $options.Concurrency } else { 4 }) -Verbose
+                Write-Host ('  {0} objects pushed, {1:N0} samples in {2:N0} calls, {3} s ({4:N0} samples/s); {5} already done' -f $result.objects, $result.samples, $result.calls, $result.seconds, $(if ($result.seconds) { $result.samples / $result.seconds } else { 0 }), $result.skipped)
+                foreach ($failure in $result.failed) { Write-Host "Failed: $failure" }
+            }
+            finally {
+                Disconnect-SynthOps -Confirm:$false
+            }
+            exit $(if ($result.failed.Count) { 1 } else { 0 })
         }
 
         { $planned.Contains($_) } {

@@ -6,7 +6,7 @@ Everything ships as one Docker image, published to `ghcr.io/msherian/vcfops-synt
 
 ## Status
 
-Phase 2 of 9: the RVTools importer, anonymiser, tiering and baselines, on top of the Phase 1 image, CLI, Suite API sign-in and CI. The commands below marked "to come" stop with exit code 3 and name the phase that builds them.
+Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history, on top of the Phase 2 importer and the Phase 1 image, CLI, Suite API sign-in and CI. The commands below marked "to come" stop with exit code 3 and name the phase that builds them.
 
 | Command | What it does | Phase |
 |---|---|---|
@@ -15,8 +15,9 @@ Phase 2 of 9: the RVTools importer, anonymiser, tiering and baselines, on top of
 | `connect-test` | Signs in to VCF Operations and prints its version | 1 |
 | `plan` | Dry run: what each stage would do | 1 |
 | `import` | RVTools export to inventory model | 2 |
-| `seed`, `reset` | Create and remove objects in VCF Operations | to come (3) |
-| `backfill` | Push generated history | to come (4) |
+| `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
+| `reset` | Remove the objects seed created | to come (3) |
+| `backfill` | Push generated history for every numeric metric | 4 |
 | `content` | Groups, policies, alerts, dashboards | to come (5 to 7) |
 | `feed`, `scenario` | Live metrics and scenario overlays | to come (6) |
 | `live-load` | Optional UPSA and load VMs | to come (9) |
@@ -63,10 +64,10 @@ The FQDN in `lab.example.json` is a placeholder in Holodeck's `site-a.vcf.lab` d
 | `paths.inventory` | `/data/inventory.json` | Where `import` writes the inventory model |
 | `import.source` | `/data/rvtools.xlsx` | RVTools xlsx, or a folder of RVTools CSV files |
 | `import.tiering` | `/config/tiering.json` | Tiering rules; without them every VM is Bronze |
-| `import.anonymise` | `true` | Replace names with pseudonyms; `--no-anonymise` overrides it for one run |
+| `import.anonymise` | `true` | Replace names with pseudonyms; `-NoAnonymise` (or `VCFOPS_SYNTH_NO_ANONYMISE=true`) overrides it for one run |
 | `liveLoad.*` | off, 6 VMs, 2 UPSA pairs | Optional live-load mode and its caps |
 
-Environment overrides: `VCFOPS_FQDN`, `VCFOPS_USERNAME`, `VCFOPS_AUTHSOURCE`, `VCFOPS_SYNTH_CONFIG` (path to `lab.json`). The password comes from `VCFOPS_PASSWORD`, or from `VCFOPS_PASSWORD_FILE` for a Docker secret such as `/run/secrets/vcfops_password`.
+Overrides for one run, as parameters or environment variables: `-Fqdn`/`VCFOPS_FQDN`, `-Username`/`VCFOPS_USERNAME`, `-AuthSource`/`VCFOPS_AUTHSOURCE` and `-ConfigPath`/`VCFOPS_SYNTH_CONFIG` (path to `lab.json`). The password is never stored in `lab.json`: it comes from `-Password`/`VCFOPS_PASSWORD`, `-PasswordFile`/`VCFOPS_PASSWORD_FILE`, or `-SecretName`/`VCFOPS_SECRET_NAME` for a Docker secret (`/run/secrets/<name>`). Any parameter wins over every variable; the password beats the file, which beats the secret. See [Parameters and environment variables](#parameters-and-environment-variables).
 
 ## Importing RVTools
 
@@ -83,6 +84,54 @@ The inventory model (schema version 3) holds the whole estate the toolset recrea
 ```
 
 VMs no rule profiles are profiled from their usage: idle under 5% CPU and 10% active memory, saturated from 80% CPU or 85% active memory, business-hours otherwise, and off when powered off. The thresholds are under `profiles` in the same file. See `config/tiering.example.json`.
+
+## Parameters and environment variables
+
+The CLI takes PowerShell parameters after the command, and every parameter can also come from an environment variable, which suits `docker run -e` and scheduled containers. A parameter on the command line wins over its variable, which wins over `lab.json`. Switches take `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0` in a variable. Variables for other commands are ignored; a parameter a command does not take, an unknown argument or a bad value stops with exit code 2.
+
+| Parameter | Variable | Commands | Meaning |
+|---|---|---|---|
+| (first argument) | `VCFOPS_SYNTH_COMMAND` | all | The command; default `help` |
+| `-ConfigPath` | `VCFOPS_SYNTH_CONFIG` | all | `lab.json`; default `/config/lab.json` |
+| `-Source` (or second argument) | `VCFOPS_SYNTH_SOURCE` | import | RVTools xlsx or CSV folder; default `import.source` |
+| `-Output` | `VCFOPS_SYNTH_OUTPUT` | import | Inventory model to write; default `paths.inventory` |
+| `-Tiering` | `VCFOPS_SYNTH_TIERING` | import | Tiering rules; default `import.tiering` |
+| `-Performance` | `VCFOPS_SYNTH_PERFORMANCE` | import | LiveOptics VMware workbook; default `import.performance` |
+| `-NoAnonymise` | `VCFOPS_SYNTH_NO_ANONYMISE` | import | Keep real names |
+| `-Adapter` | `VCFOPS_SYNTH_ADAPTER` | seed, backfill | vCenter adapter instance; default `seed.adapterInstance` |
+| `-Refresh` | `VCFOPS_SYNTH_REFRESH` | seed | Push properties and stats to objects already there |
+| `-DryRun` | `VCFOPS_SYNTH_DRY_RUN` | seed, backfill | Report only; change nothing |
+| `-Days` | `VCFOPS_SYNTH_DAYS` | backfill | Days of history; default `backfillDays` |
+| `-Kinds` | `VCFOPS_SYNTH_KINDS` | backfill | Comma-separated resource kinds |
+| `-MaxVms` | `VCFOPS_SYNTH_MAX_VMS` | backfill | First n VMs only, for a pilot |
+| `-Concurrency` | `VCFOPS_SYNTH_CONCURRENCY` | backfill | Objects posted at once; default 4 |
+| `-Restart` | `VCFOPS_SYNTH_RESTART` | backfill | Forget saved progress |
+| `-Fqdn` | `VCFOPS_FQDN` | config, connect-test, plan, seed, backfill | VCF Operations host name; default `operations.fqdn` |
+| `-Username` | `VCFOPS_USERNAME` | config, connect-test, plan, seed, backfill | Account; default `operations.username` |
+| `-AuthSource` | `VCFOPS_AUTHSOURCE` | config, connect-test, plan, seed, backfill | Authentication source; default `operations.authSource` |
+| `-Password` | `VCFOPS_PASSWORD` | connect-test, seed, backfill | The password; on a command line it shows in process lists and history, so prefer the next two |
+| `-PasswordFile` | `VCFOPS_PASSWORD_FILE` | connect-test, seed, backfill | A file holding the password |
+| `-SecretName` | `VCFOPS_SECRET_NAME` | connect-test, seed, backfill | A Docker secret holding the password, read from `/run/secrets/<name>` |
+| `-AnonymisationKey` | `VCFOPS_SYNTH_ANON_KEY` | import | Key for stable IDs and pseudonyms; default `<paths.data>/anonymise.key` |
+
+```bash
+pwsh ./bin/vcfops-synth.ps1 backfill -Kinds VirtualMachine -MaxVms 25 -ConfigPath ./config/lab.json
+docker run --rm -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
+  -e VCFOPS_SYNTH_COMMAND=seed -e VCFOPS_SYNTH_DRY_RUN=true ghcr.io/msherian/vcfops-synth
+```
+## Seeding
+
+`seed -Adapter <vCenter adapter instance>` builds the inventory as VMWARE objects under that instance, foundations first: an optional Physical Data Center (`seed.physicalDatacenter`), datacenters (linked under the vCenter), clusters, datastores, hosts, distributed switches and port groups, VM folders and VMs. Standard switches and port groups, which VMWARE does not model, go under the `adapterKind.key` push kind. Every relationship is worked out before anything is created.
+
+Rubrics captured from real lab objects (`seed.rubrics`, default `<paths.data>/rubrics`) only say which metrics and properties each kind has. Every value comes from the inventory (RVTools, LiveOptics), is derived from it (for example host use over capacity, cluster roll-ups), or is a neutral placeholder (`-`, `0`, `false`). Objects keep their inventory names (`seed.prefix` is optional) and carry two vSphere tags in `summary|tag`: `seed.tag` (default `vcfops-synth-synthetic`) and `Project-<project>`, where the project is `seed.project` or the `YYYY.#### ... OPP-n` folder the export was imported from.
+
+Objects that already exist are found by their identifiers, not their names, and skipped; `-Refresh` pushes the planned properties and current stats to them again. `-DryRun` prints the plan.
+
+## Backfill
+
+`backfill` pushes `backfillDays` of history at `intervalMinutes` for every numeric metric of the seeded objects, with analytics processing off. Metrics LiveOptics measured (VM and host CPU, memory, IOPS, throughput, latency) match its average and peak exactly. The rest follow the object's workload curve around their current value, grow to it (space in use), stay flat (capacity, counts) or stay at zero (no source). Each VM's curve comes from its workload profile in `timeZone`, with seeded noise and incident windows; hosts, clusters, datastores, port groups and folders follow the sum of their VMs' curves, so peaks line up.
+
+Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. In the lab, 30 days for 1,709 objects is 2.4 billion samples, about 620,000 a second at concurrency 4, and about 6 bytes a sample in the Operations database.
 
 ## Development
 

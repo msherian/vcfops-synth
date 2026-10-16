@@ -12,10 +12,20 @@ function Get-SynthConfig {
             VCFOPS_USERNAME   operations.username
             VCFOPS_AUTHSOURCE operations.authSource
 
+        The Fqdn, Username and AuthSource parameters win over those variables.
         The password is never read from the file; see Get-SynthSecret.
 
     .PARAMETER Path
         Path to lab.json. Defaults to $env:VCFOPS_SYNTH_CONFIG, then /config/lab.json.
+
+    .PARAMETER Fqdn
+        Overrides operations.fqdn and VCFOPS_FQDN.
+
+    .PARAMETER Username
+        Overrides operations.username and VCFOPS_USERNAME.
+
+    .PARAMETER AuthSource
+        Overrides operations.authSource and VCFOPS_AUTHSOURCE.
 
     .PARAMETER SkipValidation
         Returns the merged settings even when they fail validation, so they can be
@@ -28,6 +38,9 @@ function Get-SynthConfig {
     [OutputType([hashtable])]
     param(
         [string]$Path = $(if ($env:VCFOPS_SYNTH_CONFIG) { $env:VCFOPS_SYNTH_CONFIG } else { '/config/lab.json' }),
+        [string]$Fqdn,
+        [string]$Username,
+        [string]$AuthSource,
         [switch]$SkipValidation
     )
 
@@ -48,6 +61,9 @@ function Get-SynthConfig {
     if ($env:VCFOPS_FQDN)       { $config.operations.fqdn = $env:VCFOPS_FQDN }
     if ($env:VCFOPS_USERNAME)   { $config.operations.username = $env:VCFOPS_USERNAME }
     if ($env:VCFOPS_AUTHSOURCE) { $config.operations.authSource = $env:VCFOPS_AUTHSOURCE }
+    if ($Fqdn)       { $config.operations.fqdn = $Fqdn }
+    if ($Username)   { $config.operations.username = $Username }
+    if ($AuthSource) { $config.operations.authSource = $AuthSource }
     $config['sourcePath'] = (Resolve-Path -LiteralPath $Path).Path
 
     if (-not $SkipValidation) {

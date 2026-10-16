@@ -13,7 +13,7 @@ function Connect-SynthOps {
         Settings from Get-SynthConfig.
 
     .PARAMETER Password
-        Overrides the password from VCFOPS_PASSWORD or VCFOPS_PASSWORD_FILE.
+        Overrides the password from VCFOPS_PASSWORD, VCFOPS_PASSWORD_FILE or VCFOPS_SECRET_NAME (see Get-SynthSecret).
 
     .EXAMPLE
         Connect-SynthOps -Config (Get-SynthConfig)
@@ -27,7 +27,7 @@ function Connect-SynthOps {
 
     if (-not $Password) { $Password = Get-SynthSecret }
     if (-not $Password) {
-        throw 'No Operations password was supplied. Set VCFOPS_PASSWORD, or VCFOPS_PASSWORD_FILE for a Docker secret.'
+        throw 'No Operations password was supplied. Pass -Password, -PasswordFile or -SecretName (a Docker secret), or set VCFOPS_PASSWORD, VCFOPS_PASSWORD_FILE or VCFOPS_SECRET_NAME.'
     }
 
     $ops = $Config.operations
