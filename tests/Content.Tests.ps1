@@ -60,6 +60,10 @@ Describe 'Publish-SynthGroup' {
         @($script:calls | Where-Object Method -eq 'Post').Count | Should -Be ($script:defs.Count - 1)
     }
 
+    It 'copes with a group list that has no pageInfo, as the lab returns' {
+        Mock -ModuleName VcfOpsSynth Invoke-SynthOpsRequest { if ($Method -eq 'Get') { return [pscustomobject]@{ groups = @([pscustomobject]@{ id = 'grp-gold'; resourceKey = [pscustomobject]@{ name = 'Synth-Tier-1-Gold' } }) } }; [pscustomobject]@{ id = 'x' } }
+        (@(Publish-SynthGroup -Definition $script:defs -Prefix 'Synth-' -WhatIf) | Where-Object Name -eq 'Synth-Tier-1-Gold').Action | Should -Be 'would update'
+    }
     It 'never touches a group outside the prefix, and changes nothing on a dry run' {
         $out = @(Publish-SynthGroup -Definition $script:defs -Prefix 'Synth-' -WhatIf)
         @($script:calls | Where-Object Method -ne 'Get').Count | Should -Be 0
