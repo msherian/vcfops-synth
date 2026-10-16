@@ -119,6 +119,10 @@ function Invoke-SynthOpsRequest {
     .PARAMETER Body
         An object serialised to JSON, or a JSON string sent as is.
 
+    .PARAMETER Form
+        Multipart form fields, sent in place of a JSON body; a file field is a
+        FileInfo (Get-Item). Used for content and policy imports.
+
     .PARAMETER MaxRetries
         Retries after the first attempt for 429 and 5xx answers. Defaults to 4.
 
@@ -134,6 +138,7 @@ function Invoke-SynthOpsRequest {
         [Parameter(Mandatory)][string]$Path,
         [hashtable]$Query,
         $Body,
+        [hashtable]$Form,
         [ValidateRange(0, 10)][int]$MaxRetries = 4,
         [switch]$NoRetry
     )
@@ -167,6 +172,9 @@ function Invoke-SynthOpsRequest {
         if ($null -ne $json) {
             $request.ContentType = 'application/json'
             $request.Body = $json
+        }
+        elseif ($Form) {
+            $request.Form = $Form
         }
 
         try {
