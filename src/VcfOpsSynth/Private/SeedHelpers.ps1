@@ -293,6 +293,26 @@ function Get-SynthPlaceholder {
     '-'
 }
 
+function Test-SynthComputedStatKey {
+    <#
+    .SYNOPSIS
+        True for a stat key Operations computes itself, which the seed and backfill must not push.
+
+    .DESCRIPTION
+        Capacity analytics (time and capacity remaining, recommended size, usable
+        capacity after buffers), badges, alert counts, workload scores,
+        reclamation, rightsizing, sustainability and capacity profiles. Pushing
+        them, even as zero, shows as 0 Days and 0 % remaining in the UI.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$Key)
+
+    $Key -match '^(OnlineCapacityAnalytics|badge|System Attributes|Super Metric|reclaimable|reclamation|rightsizing|sustainability|Profiles|cost)(\||:)' -or
+    $Key -match '(?i)\|(workload|max_host_workload|active_shortterm_load|timeRemaining|capacityRemaining|recommendedSize)$' -or
+    $Key -match '(?i)\|demand\|usableCapacity$'
+}
+
 function Get-SynthDerivedStat {
     <#
     .SYNOPSIS
@@ -346,6 +366,7 @@ function Get-SynthDerivedStat {
                 $consumedKb = if ($on) { (& $num $mem.consumedMiB) * 1024 } else { 0 }
                 $d['mem|guest_provisioned'] = $sizeKb
                 $d['mem|active_average'] = $activeKb; $d['mem|host_demand'] = $activeKb
+                $d['mem|guest_demand'] = $activeKb; $d['mem|vmMemoryDemand'] = $activeKb
                 $d['mem|consumed_average'] = $consumedKb; $d['mem|guest_usage'] = $consumedKb
                 $d['mem|usage_average'] = & $pct $activeKb $sizeKb
                 $d['mem|vmmemctl_average'] = if ($on) { (& $num $mem.balloonedMiB) * 1024 } else { 0 }
@@ -353,6 +374,7 @@ function Get-SynthDerivedStat {
             }
             if ($st) {
                 $d['diskspace|provisioned'] = [math]::Round((& $num $st.provisionedMiB) / 1024, 2)
+                $d['diskspace|provisionedSpace'] = $d['diskspace|provisioned']
                 $d['diskspace|used'] = [math]::Round((& $num $st.inUseMiB) / 1024, 2)
                 $capGb = (& $sum $st.partitions { param($p) (& $num $p.capacityMiB) / 1024 })
                 $useGb = (& $sum $st.partitions { param($p) (& $num $p.consumedMiB) / 1024 })
@@ -376,7 +398,7 @@ function Get-SynthDerivedStat {
             $capMhz = & $hostCapMhz $Item
             $usedMhz = & $hostUsedMhz $Item
             $d['cpu|usage_average'] = & $num (& $base $Item 'cpuUsagePct'); $d['cpu|demandPct'] = $d['cpu|usage_average']
-            $d['cpu|usagemhz_average'] = $usedMhz; $d['cpu|demandmhz'] = $usedMhz
+            $d['cpu|usagemhz_average'] = $usedMhz; $d['cpu|demandmhz'] = $usedMhz; $d['cpu|demand_without_overhead'] = $usedMhz
             $d['cpu|capacity_provisioned'] = $capMhz; $d['cpu|totalCapacity_average'] = $capMhz
             $d['cpu|corecount_provisioned'] = & $num $Item.cores
             $d['cpu|capacity_usagepct_average'] = & $pct $usedMhz $capMhz
@@ -384,6 +406,11 @@ function Get-SynthDerivedStat {
             $memKb = & $hostMemKb $Item
             $d['mem|host_provisioned'] = $memKb; $d['mem|totalCapacity_average'] = $memKb
             $d['mem|consumed_average'] = & $hostUsedKb $Item; $d['mem|host_usage'] = $d['mem|consumed_average']
+            # The capacity engine reads memory demand over usable memory.
+            $d['mem|host_usable'] = $memKb; $d['mem|host_demand'] = $d['mem|consumed_average']
+            $hostDs = (& $children 'datastoresByHost')
+            $d['diskspace|total_capacity'] = [math]::Round((& $sum $hostDs { param($x) & $num $x.capacityMiB }) / 1024, 2)
+            $d['diskspace|total_provisioned'] = [math]::Round((& $sum $hostDs { param($x) & $num $x.provisionedMiB }) / 1024, 2)
             $d['mem|usage_average'] = & $num (& $base $Item 'memUsagePct'); $d['mem|host_usagePct'] = $d['mem|usage_average']
             $d['mem|active_average'] = & $sum $vms { param($v) if (& $vmOn $v) { (& $num $v.memory.activeMiB) * 1024 } else { 0 } }
             $d['summary|total_number_vms'] = $vms.Count
@@ -412,6 +439,16 @@ function Get-SynthDerivedStat {
             $d['cpu|vm_capacity_provisioned'] = & $sum $vms { param($v) & $num $v.cpu.capacityMhz }
             $d['mem|host_provisioned'] = $memKb; $d['mem|totalCapacity_average'] = $memKb
             $d['mem|consumed_average'] = $usedKb; $d['mem|host_usage'] = $usedKb
+            $d['mem|host_usable'] = $memKb; $d['mem|host_demand'] = $usedKb; $d['cpu|demand_without_overhead'] = $usedMhz
+            $d['cpu|haTotalCapacity_average'] = $capMhz; $d['mem|haTotalCapacity_average'] = $memKb
+            $d['cpu|haCorecount_provisioned'] = $d['cpu|corecount_provisioned']
+            # Disk space over the datastores its hosts see, each once.
+            $dsSeen = @{}
+            foreach ($h in $hosts) { if ($h.id -and $Context['datastoresByHost'].ContainsKey($h.id)) { foreach ($x in @($Context['datastoresByHost'][$h.id])) { if ($x -and $x.id) { $dsSeen[$x.id] = $x } } } }
+            $dsCapGb = [math]::Round((& $sum $dsSeen.Values { param($x) & $num $x.capacityMiB }) / 1024, 2)
+            $dsProvGb = [math]::Round((& $sum $dsSeen.Values { param($x) & $num $x.provisionedMiB }) / 1024, 2)
+            $d['diskspace|total_capacity'] = $dsCapGb; $d['diskspace|usable_capacity'] = $dsCapGb
+            $d['diskspace|total_provisioned'] = $dsProvGb; $d['diskspace|total_provisioned_with_overhead'] = $dsProvGb
             $d['mem|usage_average'] = & $pct $usedKb $memKb; $d['mem|host_usagePct'] = $d['mem|usage_average']
             $d['summary|total_number_hosts'] = $hosts.Count
             $d['summary|number_running_hosts'] = @($hosts | Where-Object { -not $_.maintenance }).Count
