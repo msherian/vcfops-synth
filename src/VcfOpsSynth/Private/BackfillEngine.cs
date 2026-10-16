@@ -478,7 +478,7 @@ namespace VcfOpsSynth
 
         public static double ShapeAt(ObjectSpec o, long ms, int stepMs, double how)
         {
-            if (o.Components == null || o.Components.Length == 0)
+            if (Backfill.HasNoActiveComponent(o))
                 return Math.Exp(0.05 * Gauss(Hash("feedflat|" + o.Seed), ms / Math.Max(1, stepMs)));
             double sum = 0;
             foreach (var c in o.Components) sum += c.Weight * ComponentAt(c, ms, stepMs, how);

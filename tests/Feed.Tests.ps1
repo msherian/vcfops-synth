@@ -71,6 +71,16 @@ Describe 'Feed engine' {
         $noon | Should -BeGreaterThan (2 * $night)
     }
 
+    It 'keeps a host whose VMs are all off near its LiveOptics average, as the backfill does' {
+        $o = New-TestObjectSpec -Key 'esx-off' -WorkloadProfile 'off' -Series @(New-TestSeries -Key 'cpu|usage_average' -Mode Calibrated -A 30 -B 90 -Cap 100)
+        $c = [VcfOpsSynth.ShapeComponent]::new(); $c.Profile = 'off'; $c.Seed = 'vm-off-2'; $c.Weight = 1
+        $o.Components = @($o.Components[0], $c)
+        $f = [VcfOpsSynth.Feed]::Prepare($o, $script:start, $script:step, $script:points, 'Europe/Dublin')
+        $m = Get-FeedValue $f 0 $script:week | Measure-Object -Average
+        $m.Average | Should -BeGreaterThan 25
+        $m.Average | Should -BeLessThan 35
+    }
+
     It 'keeps the edge cases: flat when the peak is the average, zero when the average is zero, constants constant' {
         $o = New-TestObjectSpec -Series @(
             (New-TestSeries -Key 'mem|usage_average' -Mode Calibrated -A 45 -B 45 -Cap 100),
