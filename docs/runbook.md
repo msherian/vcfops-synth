@@ -1,5 +1,90 @@
 # Runbook
 
+## Running from the container
+
+The image `ghcr.io/msherian/vcfops-synth` runs every command the script does. It reads `lab.json` from `/config` and keeps the inventory, rubrics and backfill progress in `/data`, so both are bind mounts. Nothing secret goes into the image or `lab.json`.
+
+### Folders
+
+```text
+config/lab.json          from config/lab.example.json; set operations.fqdn and seed.adapterInstance
+config/tiering.json      from config/tiering.example.json (import only)
+data/rvtools.xlsx        the RVTools export (import only)
+data/rubrics/            the rubrics captured from this lab (spike 0.5); seed and backfill need them
+data/inventory.json      written by import
+data/state.json          backfill progress, so a stopped run resumes
+```
+
+The rubrics and inventory hold real names, so they stay in `data/`, which is never committed. Copy `data/rubrics/` from the machine that captured them.
+
+### Run as your own user
+
+The image runs as a user with uid 999. On a Linux host it cannot write a `data/` folder owned by you, and `import` stops with `Access to the path '/data/inventory.json' is denied`. Pass your own uid and gid:
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/config:/config" -v "$PWD/data:/data" \
+  ghcr.io/msherian/vcfops-synth plan
+```
+
+Docker Desktop on Windows and macOS maps bind-mount ownership itself. There, `--user` should not be needed, though this hasn't been tested yet.
+
+### Sign in with the VCF installer credentials file
+
+Mount the file read-only and point `VCFOPS_CREDENTIAL_FILE` at it. It supplies the VCF Operations host, account and password, so nothing else is needed:
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/config:/config" -v "$PWD/data:/data" \
+  -v "$HOME/vcf-installer-creds.json:/run/secrets/vcf-creds.json:ro" \
+  -e VCFOPS_CREDENTIAL_FILE=/run/secrets/vcf-creds.json \
+  ghcr.io/msherian/vcfops-synth connect-test
+```
+
+- The container's user must be able to read the file. If it can't, the error reads `is not valid JSON`, which is misleading, so check the file's owner and mode first.
+- `config` prints the host it picked from the file, but never the password.
+- Alternatives:
+  - a password file (`-e VCFOPS_PASSWORD_FILE=/run/secrets/ops-pass` with that file mounted);
+  - a Docker secret (`-e VCFOPS_SECRET_NAME=ops-pass`);
+  - `VCFOPS_PASSWORD` in the environment, which leaves the password visible in `docker inspect`.
+
+On PowerShell (Windows), replace `$PWD/...` with `${PWD}/...` and `$HOME` with `$env:USERPROFILE`. Write each `docker run` on one line, or end lines with a backtick instead of `\`.
+
+### Seed and backfill
+
+Check first with dry runs, then run the commands for real:
+
+```bash
+opts=(--rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data"
+      -v "$HOME/vcf-installer-creds.json:/run/secrets/vcf-creds.json:ro"
+      -e VCFOPS_CREDENTIAL_FILE=/run/secrets/vcf-creds.json)
+img=ghcr.io/msherian/vcfops-synth
+
+docker run "${opts[@]}" "$img" seed -DryRun
+docker run "${opts[@]}" "$img" seed
+docker run "${opts[@]}" "$img" backfill -DryRun
+docker run "${opts[@]}" "$img" backfill -Concurrency 2
+```
+
+- **Resuming:** backfill saves its progress to `/data/state.json`. If the container stops, the same command resumes where it left off; `-Restart` starts afresh.
+- **Long runs:** run detached (`-d --name synth-backfill` in place of `--rm`) and follow progress with `docker logs -f synth-backfill`.
+- **Memory:** on a small host such as 8 GB, use `-Concurrency 2`. Also watch the first minutes with `docker stats`. On 15 October 2026 a backfill at concurrency 4 on the 8 GB jump host ran out of memory; the engine has streamed its requests since then.
+
+### Name resolution
+
+The container has to resolve the VCF Operations host name. If the lab's DNS is only known to the host, pass `--dns <lab DNS server>`, or `--add-host <fqdn>:<address>`. When the name doesn't resolve, sign-in fails with `Name or service not known (<fqdn>:443)`.
+
+### Tested
+
+On 16 October 2026, an image built from main (df50e90) was tested with the invented fixture in `tests/fixtures/rvtools-4x`. It was built locally without ImportExcel, so only CSV import was covered:
+- the `version`, `config`, `import` (CSV), `plan` and `connect-test` commands ran;
+- the `--user` fix and the credentials-file mount behaved as described above.
+
+Not tested yet:
+- running the image against the lab;
+- Docker Desktop on Windows.
+
+
 ## Phase 0 spikes (VCF Operations 9.1.1.0, Holodeck 9.1)
 
 Run on 15 October 2026 against the Holodeck lab (`ops-a.site-a.mars.local`, signed in as the local `admin`), from a Windows Server jump host with PowerShell 7.6. All paths below are under `/suite-api`. Everything created was named `Synth-` and removed afterwards, except the two items listed under "Left behind".
