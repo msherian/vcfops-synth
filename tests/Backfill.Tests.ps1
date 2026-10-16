@@ -69,6 +69,16 @@ Describe 'Backfill engine' {
         ($day / $dayN) | Should -BeGreaterThan (5 * $night / $nightN)
     }
 
+    It 'meets a host''s LiveOptics average and peak when all its VMs are powered off' {
+        $o = New-TestObjectSpec -Key 'esx-off' -WorkloadProfile 'off'
+        $c = [VcfOpsSynth.ShapeComponent]::new(); $c.Profile = 'off'; $c.Seed = 'vm-off-2'; $c.Weight = 1
+        $o.Components = @($o.Components[0], $c)
+        $m = Get-Curve $o (New-TestSeries -Key 'cpu|usage_average' -Mode Calibrated -A 30 -B 90 -Cap 100) | Measure-Object -Average -Maximum -Minimum
+        [math]::Round($m.Average, 3) | Should -Be 30
+        [math]::Round($m.Maximum, 3) | Should -Be 90
+        $m.Minimum | Should -BeGreaterOrEqual 0
+    }
+
     It 'gives the same curve for the same seed, so a rerun overwrites with identical values' {
         $s = New-TestSeries -Key 'cpu|usage_average' -Mode Calibrated -A 10 -B 80 -Cap 100
         (Get-Curve (New-TestObjectSpec -Key 'vm-a') $s) -join ',' | Should -Be ((Get-Curve (New-TestObjectSpec -Key 'vm-a') $s) -join ',')
