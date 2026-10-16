@@ -107,6 +107,27 @@ Describe 'vcfops-synth CLI' {
         $result.Output | Should -Match '^vcfops-synth \d+\.\d+\.\d+'
     }
 
+    It 'takes the host and account from -CredentialFile, with single values winning in the same tier' {
+        $creds = Join-Path $TestDrive 'creds.json'
+        @{ components = @(@{ componentName = 'VCF Operations'; FQDN = 'ops-creds.example.test'
+                    credentials = @(@{ type = 'Administrator credentials'; user = 'creds-admin'; password = 'not-shown-1' }) }) } |
+            ConvertTo-Json -Depth 10 | Set-Content -Path $creds
+        # The parameter beats lab.json and the variables.
+        $result = Invoke-Cli @('config', '-CredentialFile', $creds, '-ConfigPath', $script:example) -Environment @{ VCFOPS_FQDN = 'ops-env.example.test' }
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -BeLike '*ops-creds.example.test*'
+        $result.Output | Should -BeLike '*creds-admin*'
+        $result.Output | Should -Not -BeLike '*not-shown-1*'
+        # -Fqdn beats the file among parameters.
+        $result = Invoke-Cli @('config', '-CredentialFile', $creds, '-Fqdn', 'ops-param.example.test', '-ConfigPath', $script:example)
+        $result.Output | Should -BeLike '*ops-param.example.test*'
+        $result.Output | Should -BeLike '*creds-admin*'
+        # VCFOPS_FQDN beats VCFOPS_CREDENTIAL_FILE among variables.
+        $result = Invoke-Cli @('config', '-ConfigPath', $script:example) -Environment @{ VCFOPS_CREDENTIAL_FILE = $creds; VCFOPS_FQDN = 'ops-env.example.test' }
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -BeLike '*ops-env.example.test*'
+        $result.Output | Should -BeLike '*creds-admin*'
+    }
     It 'takes the sign-in settings as parameters, and keeps the password out of commands that do not sign in' {
         $result = Invoke-Cli @('config', '-Fqdn', 'ops-param.example.test', '-ConfigPath', $script:example) -Environment @{ VCFOPS_FQDN = 'ops-env.example.test' }
         $result.ExitCode | Should -Be 0

@@ -27,7 +27,7 @@ function Connect-SynthOps {
 
     if (-not $Password) { $Password = Get-SynthSecret }
     if (-not $Password) {
-        throw 'No Operations password was supplied. Pass -Password, -PasswordFile or -SecretName (a Docker secret), or set VCFOPS_PASSWORD, VCFOPS_PASSWORD_FILE or VCFOPS_SECRET_NAME.'
+        throw 'No Operations password was supplied. Pass -Password, -PasswordFile, -SecretName (a Docker secret) or -CredentialFile (the VCF installer credentials file), or set VCFOPS_PASSWORD, VCFOPS_PASSWORD_FILE, VCFOPS_SECRET_NAME or VCFOPS_CREDENTIAL_FILE.'
     }
 
     $ops = $Config.operations

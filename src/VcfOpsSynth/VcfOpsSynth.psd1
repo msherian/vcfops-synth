@@ -11,6 +11,7 @@
         'Connect-SynthOps'
         'Disconnect-SynthOps'
         'Get-SynthSecret'
+        'Read-SynthCredentialFile'
         'Invoke-SynthOpsRequest'
         'Get-SynthOpsVersion'
         'Get-SynthTieringRule'

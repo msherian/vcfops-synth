@@ -67,7 +67,7 @@ The FQDN in `lab.example.json` is a placeholder in Holodeck's `site-a.vcf.lab` d
 | `import.anonymise` | `true` | Replace names with pseudonyms; `-NoAnonymise` (or `VCFOPS_SYNTH_NO_ANONYMISE=true`) overrides it for one run |
 | `liveLoad.*` | off, 6 VMs, 2 UPSA pairs | Optional live-load mode and its caps |
 
-Overrides for one run, as parameters or environment variables: `-Fqdn`/`VCFOPS_FQDN`, `-Username`/`VCFOPS_USERNAME`, `-AuthSource`/`VCFOPS_AUTHSOURCE` and `-ConfigPath`/`VCFOPS_SYNTH_CONFIG` (path to `lab.json`). The password is never stored in `lab.json`: it comes from `-Password`/`VCFOPS_PASSWORD`, `-PasswordFile`/`VCFOPS_PASSWORD_FILE`, or `-SecretName`/`VCFOPS_SECRET_NAME` for a Docker secret (`/run/secrets/<name>`). Any parameter wins over every variable; the password beats the file, which beats the secret. See [Parameters and environment variables](#parameters-and-environment-variables).
+Overrides for one run, as parameters or environment variables: `-Fqdn`/`VCFOPS_FQDN`, `-Username`/`VCFOPS_USERNAME`, `-AuthSource`/`VCFOPS_AUTHSOURCE` and `-ConfigPath`/`VCFOPS_SYNTH_CONFIG` (path to `lab.json`). The password is never stored in `lab.json`: it comes from `-Password`/`VCFOPS_PASSWORD`, `-PasswordFile`/`VCFOPS_PASSWORD_FILE`, `-SecretName`/`VCFOPS_SECRET_NAME` for a Docker secret (`/run/secrets/<name>`), or `-CredentialFile`/`VCFOPS_CREDENTIAL_FILE`, the VCF installer credentials file, which also gives the host and account. Any parameter wins over every variable. Among parameters, and again among variables, a single value (`-Fqdn`, `-Username`, a password) beats the credentials file, and the password beats the file, which beats the secret. See [Parameters and environment variables](#parameters-and-environment-variables).
 
 ## Importing RVTools
 
@@ -112,10 +112,12 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-Password` | `VCFOPS_PASSWORD` | connect-test, seed, backfill | The password; on a command line it shows in process lists and history, so prefer the next two |
 | `-PasswordFile` | `VCFOPS_PASSWORD_FILE` | connect-test, seed, backfill | A file holding the password |
 | `-SecretName` | `VCFOPS_SECRET_NAME` | connect-test, seed, backfill | A Docker secret holding the password, read from `/run/secrets/<name>` |
+| `-CredentialFile` | `VCFOPS_CREDENTIAL_FILE` | config, connect-test, plan, seed, backfill | The VCF installer credentials file (JSON): host, account and password from its VCF Operations entry and Administrator credentials; `-Fqdn` picks one when it lists several |
 | `-AnonymisationKey` | `VCFOPS_SYNTH_ANON_KEY` | import | Key for stable IDs and pseudonyms; default `<paths.data>/anonymise.key` |
 
 ```bash
 pwsh ./bin/vcfops-synth.ps1 backfill -Kinds VirtualMachine -MaxVms 25 -ConfigPath ./config/lab.json
+pwsh ./bin/vcfops-synth.ps1 backfill -CredentialFile ~/Documents/vcf-installer-creds.json -ConfigPath ./config/lab.json
 docker run --rm -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
   -e VCFOPS_SYNTH_COMMAND=seed -e VCFOPS_SYNTH_DRY_RUN=true ghcr.io/msherian/vcfops-synth
 ```
