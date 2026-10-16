@@ -418,6 +418,7 @@ namespace VcfOpsSynth
 
     public static class Feed
     {
+        static readonly Overlay[] NoOverlays = new Overlay[0];
         static ulong Mix(ulong h)
         {
             h ^= h >> 33; h *= 0xff51afd7ed558ccdUL; h ^= h >> 33; h *= 0xc4ceb9fe1a85ec53UL; h ^= h >> 33;
@@ -568,7 +569,7 @@ namespace VcfOpsSynth
         {
             var s = f.Spec.Series[j];
             double v = BaseValue(f, j, shapeNow, ms, stepMs);
-            foreach (var ov in f.Overlays)
+            foreach (var ov in f.Overlays ?? NoOverlays)
             {
                 if (!Matches(ov, s.Key)) continue;
                 double p = Progress(ov, ms);
@@ -584,7 +585,7 @@ namespace VcfOpsSynth
             }
             if (v < 0) v = 0;
             // A scenario may go past the cap on purpose (a host at 105 % demand), so only base values are capped.
-            if (!double.IsNaN(s.Cap) && v > s.Cap && !f.Overlays.Any(o => Matches(o, s.Key) && Progress(o, ms) > 0)) v = s.Cap;
+            if (!double.IsNaN(s.Cap) && v > s.Cap && !(f.Overlays ?? NoOverlays).Any(o => Matches(o, s.Key) && Progress(o, ms) > 0)) v = s.Cap;
             return v;
         }
 
@@ -640,10 +641,10 @@ namespace VcfOpsSynth
             if (withText)
             {
                 long last = times[times.Length - 1];
-                for (int k = 0; k < f.TextKeys.Length; k++)
+                for (int k = 0; f.TextKeys != null && k < f.TextKeys.Length; k++)
                 {
                     bool dropped = false;
-                    foreach (var ov in f.Overlays) if (ov.Op == OverlayOp.Drop && Progress(ov, last) > 0 && Matches(ov, f.TextKeys[k])) dropped = true;
+                    foreach (var ov in f.Overlays ?? NoOverlays) if (ov.Op == OverlayOp.Drop && Progress(ov, last) > 0 && Matches(ov, f.TextKeys[k])) dropped = true;
                     if (dropped) continue;
                     if (!first) sb.Append(',');
                     first = false;
