@@ -162,6 +162,22 @@ Describe 'Backfill specs' {
         "$($io.Mode) $($io.A) $($io.B)" | Should -Be 'Calibrated 100 900'
     }
 
+    It 'puts a VM''s LiveOptics disk throughput on its first disk too, since Ops sums disks into the total' {
+        InModuleScope VcfOpsSynth {
+            $plan = @{ objects = @(@{ key = 'vm-1'; kind = 'VirtualMachine'; stats = @(
+                            @{ key = 'virtualDisk|write_average'; value = 0 }, @{ key = 'virtualDisk:scsi0:1|write_average'; value = 0 },
+                            @{ key = 'virtualDisk:scsi0:0|write_average'; value = 0 }, @{ key = 'virtualDisk:scsi0:0|read_average'; value = 0 }) }) }
+            $inventory = @{ datacenters = @(); clusters = @(); hosts = @(); datastores = @(); switches = @(); networks = @(); folders = @(); vms = @(@{ id = 'vm-1'; powerState = 'poweredOn'; profile = 'steady'; host = $null; cluster = $null; datacenter = $null; folderId = $null; datastores = @(); nics = @(); cpu = @{ capacityMhz = 2000; usageMhz = 100 }; memory = @{ sizeMiB = 1024 }
+                        baseline = @{ perf = @{ writeMBpsAvg = 2; writeMBpsPeak = 40 } } }) }
+            $series = (New-SynthBackfillSpec -Plan $plan -Inventory $inventory -Ids @{ 'vm-1' = 'r1' }).Series
+            $get = { param($k) @($series | Where-Object Key -eq $k)[0] }
+            "$((& $get 'virtualDisk:scsi0:0|write_average').Mode) $((& $get 'virtualDisk:scsi0:0|write_average').A) $((& $get 'virtualDisk:scsi0:0|write_average').B)" | Should -Be 'Calibrated 2048 40960'
+            "$((& $get 'virtualDisk|write_average').Mode)" | Should -Be 'Calibrated'
+            "$((& $get 'virtualDisk:scsi0:1|write_average').Mode) $((& $get 'virtualDisk:scsi0:1|write_average').A)" | Should -Be 'Constant 0'
+            "$((& $get 'virtualDisk:scsi0:0|read_average').Mode)" | Should -Be 'Constant'
+        }
+    }
+
     It 'classifies the rest: activity, growth, flat, zero; and never calibrates a powered-off VM' {
         (Get-Series $script:byKey['vm-1'] 'cpu|readyPct').Mode | Should -Be 'Activity'
         (Get-Series $script:byKey['vm-1'] 'cpu|readyPct').Cap | Should -Be 100
