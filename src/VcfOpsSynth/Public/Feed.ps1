@@ -123,7 +123,7 @@ function Get-SynthScenarioCatalogue {
         S1 = [ordered]@{ Name = 'noisy-neighbour'; Target = 'HostSystem'; Description = 'Bronze VMs on one host take its CPU; the Gold VMs there see ready time and contention' }
         S2 = [ordered]@{ Name = 'memory-pressure'; Target = 'HostSystem'; Description = 'Ballooning, swapping and memory contention on one host and its VMs' }
         S3 = [ordered]@{ Name = 'storage-latency'; Target = 'Datastore'; Description = 'Read and write latency step on one datastore and the VMs on it' }
-        S4 = [ordered]@{ Name = 'guest-disk-filling'; Target = 'VirtualMachine'; Description = "One VM's guest file systems fill to 95 %" }
+        S4 = [ordered]@{ Name = 'guest-disk-filling'; Target = 'VirtualMachine'; Description = "One VM's guest file systems fill to 97 %" }
         S8 = [ordered]@{ Name = 'host-failure'; Target = 'HostSystem'; Description = 'One host stops reporting and shows as not responding; its cluster loses that capacity and the other hosts take its load' }
     }
 }
@@ -306,12 +306,12 @@ function Get-SynthScenarioEffect {
             $o = $planStats[$target]
             foreach ($s in @($o.stats | Where-Object { $_.key -match '^guestfilesystem:([^|]+)\|capacity$' })) {
                 $path = [regex]::Escape(($s.key -split '\|')[0])
-                if ($s.value -isnot [string] -and [double]$s.value -gt 0) { & $add $target "^$path\|usage$" Set (0.95 * [double]$s.value) }
-                & $add $target "^$path\|percentage$" Set 95
+                if ($s.value -isnot [string] -and [double]$s.value -gt 0) { & $add $target "^$path\|usage$" Set (0.97 * [double]$s.value) }
+                & $add $target "^$path\|percentage$" Set 97
             }
-            & $add $target '^guestfilesystem\|percentage_total$' Set 95
+            & $add $target '^guestfilesystem\|percentage_total$' Set 97
             $cap = & $statValue $target 'guestfilesystem|capacity_total'
-            if ($cap) { & $add $target '^guestfilesystem\|usage_total$' Set (0.95 * $cap) }
+            if ($cap) { & $add $target '^guestfilesystem\|usage_total$' Set (0.97 * $cap) }
         }
         'S8' {
             $h = $hostOf[$target]

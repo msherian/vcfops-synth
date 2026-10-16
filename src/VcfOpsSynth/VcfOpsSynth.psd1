@@ -44,6 +44,10 @@
         'Stop-SynthScenario'
         'Set-SynthFeedOverlay'
         'Invoke-SynthFeed'
+        'Get-SynthAlertContent'
+        'ConvertTo-SynthSymptomBody'
+        'ConvertTo-SynthAlertBody'
+        'Publish-SynthAlertContent'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
