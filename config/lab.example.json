@@ -30,7 +30,8 @@
     "rubrics": "",
     "prefix": "",
     "tag": { "category": "vcfops-synth", "name": "synthetic" },
-    "physicalDatacenter": "Synthetic Physical Datacenter"
+    "physicalDatacenter": "Synthetic Physical Datacenter",
+    "project": ""
   },
   "liveLoad": {
     "enabled": false,

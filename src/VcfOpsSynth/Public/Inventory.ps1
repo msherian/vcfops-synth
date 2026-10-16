@@ -117,6 +117,7 @@ function Import-SynthRvtools {
     $clusters = @{}
     $hosts = @{}
     $hostsByName = @{}
+    $servers = [System.Collections.Generic.SortedSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $clusterFlags = @{}
     if ($tabs.ContainsKey('vCluster')) {
         $t = $tabs.vCluster
@@ -126,6 +127,7 @@ function Import-SynthRvtools {
             $clusterFlags["$(Get-SynthRvCell $row $t.Columns 'server')|$name"] = @{
                 haEnabled  = ConvertTo-SynthBoolean (Get-SynthRvCell $row $t.Columns 'haEnabled')
                 drsEnabled = ConvertTo-SynthBoolean (Get-SynthRvCell $row $t.Columns 'drsEnabled')
+                config     = Get-SynthRvConfig $row $t.Columns -Anonymise:$Anonymise
             }
         }
     }
@@ -145,13 +147,14 @@ function Import-SynthRvtools {
         $clusterKey = "$Server|$ClusterName"
         if (-not $clusters.ContainsKey($clusterKey)) {
             $id = & $newId 'cluster' $clusterKey
-            $flags = if ($clusterFlags.ContainsKey($clusterKey)) { $clusterFlags[$clusterKey] } else { @{ haEnabled = $null; drsEnabled = $null } }
+            $flags = if ($clusterFlags.ContainsKey($clusterKey)) { $clusterFlags[$clusterKey] } else { @{ haEnabled = $null; drsEnabled = $null; config = [ordered]@{} } }
             $clusters[$clusterKey] = [ordered]@{
                 id         = $id
                 name       = (& $label $ClusterName $id)
                 datacenter = $dcId
                 haEnabled  = $flags.haEnabled
                 drsEnabled = $flags.drsEnabled
+                config     = $flags.config
             }
         }
         elseif (-not $clusters[$clusterKey].datacenter) {
@@ -171,6 +174,7 @@ function Import-SynthRvtools {
             continue
         }
         $server = [string](Get-SynthRvCell $row $t.Columns 'server')
+        if ($server) { $null = $servers.Add($server) }
         $hostKey = "$server|$name"
         if ($hosts.ContainsKey($hostKey)) {
             $report.skipped.Add(@{ tab = 'vHost'; row = $rowNumber; reason = 'duplicate host' })
@@ -194,6 +198,7 @@ function Import-SynthRvtools {
             vendor      = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'vendor')
             model       = ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'model')
             maintenance = ConvertTo-SynthBoolean (Get-SynthRvCell $row $t.Columns 'maintenance')
+            config      = Get-SynthRvConfig $row $t.Columns -Anonymise:$Anonymise
             baseline    = [ordered]@{
                 cpuUsagePct = ConvertTo-SynthPercent (ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'cpuUsagePct'))
                 memUsagePct = ConvertTo-SynthPercent (ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'memUsagePct'))
@@ -256,6 +261,7 @@ function Import-SynthRvtools {
                 provisionedMiB = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'provisionedMiB')
                 inUseMiB       = $inUse
                 hosts          = $hostIds
+                config         = Get-SynthRvConfig $row $t.Columns -Anonymise:$Anonymise
                 baseline       = [ordered]@{
                     usedPct = if ($capacity -gt 0 -and $null -ne $inUse) { ConvertTo-SynthPercent ($inUse / $capacity * 100) } else { $null }
                 }
@@ -320,6 +326,7 @@ function Import-SynthRvtools {
                 mtu        = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'maxMtu')
                 ports      = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'ports')
                 hosts      = [System.Collections.Generic.List[string]]::new()
+                config     = Get-SynthRvConfig $row $t.Columns -Anonymise:$Anonymise
             }
             foreach ($member in & $splitList (Get-SynthRvCell $row $t.Columns 'hostMembers')) {
                 $h = & $findHost $server $member
@@ -337,6 +344,7 @@ function Import-SynthRvtools {
             $sw = if ($switchName) { $switches["$server|dvs|$switchName"] } else { $null }
             $net = & $addNetwork "$server|dvpg|$switchName|$name" $name 'distributed' $(if ($sw) { $sw.id }) $(if ($sw) { $sw.datacenter }) (ConvertTo-SynthText (Get-SynthRvCell $row $t.Columns 'vlan'))
             $net.ports = ConvertTo-SynthNumber (Get-SynthRvCell $row $t.Columns 'ports')
+            $net.config = Get-SynthRvConfig $row $t.Columns -Anonymise:$Anonymise
             if ($sw) { foreach ($h in $sw.hosts) { & $addHostTo $net $h } }
         }
     }
@@ -581,6 +589,7 @@ function Import-SynthRvtools {
         }
         $id = & $newId 'vm' $vmKey
         $server = [string](Get-SynthRvCell $row $t.Columns 'server')
+        $vmConfig = Get-SynthRvConfig $row $t.Columns -Anonymise:$Anonymise
         $where = if ($Anonymise) { "vInfo row $rowNumber ($id)" } else { "vInfo row $rowNumber ($name)" }
 
         # Placement.
@@ -765,6 +774,8 @@ function Import-SynthRvtools {
             datastores      = $datastoreIds
             folderId        = $folderId
             resourcePoolId  = if ($pool) { $pool.id } else { $null }
+            config          = $vmConfig
+            cpuReadyPct     = if ($vmConfig.Contains('cpuReadiness')) { ConvertTo-SynthNumber $vmConfig.cpuReadiness } else { $null }
             tier            = $assigned.tier
             application     = $assigned.application
             profile         = $assigned.profile
@@ -846,7 +857,7 @@ function Import-SynthRvtools {
     foreach ($record in @($switches.Values) + @($networks.Values)) { $record.hosts = @($record.hosts | Sort-Object) }
     foreach ($record in $switches.Values) { if ($record.Contains('portGroups')) { $record.portGroups = @($record.portGroups | Sort-Object) } }
     [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         importedAt    = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture)
         source        = [ordered]@{
             format         = $source.Format
@@ -854,6 +865,9 @@ function Import-SynthRvtools {
             rvtoolsVersion = $metadata.rvtoolsVersion
             exportedAt     = $metadata.created
             anonymised     = [bool]$Anonymise
+            # The customer's vCenter (VI SDK Server) and the project folder the export sits in; both are real names.
+            vcenter        = if ($Anonymise) { $null } else { ($servers -join ', ') }
+            project        = if ($Anonymise) { $null } else { Get-SynthProjectName -Path $source.Source }
             tiering        = if ($TieringRules.sourcePath) { Split-Path -Leaf $TieringRules.sourcePath } else { $null }
             performance    = if ($Performance) { [ordered]@{ format = 'LiveOptics'; collectedOn = $Performance.CollectedOn } } else { $null }
         }
@@ -903,8 +917,8 @@ function Get-SynthInventory {
         throw "No inventory at '$Path'. Run 'import' first."
     }
     $inventory = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable
-    if ($inventory.schemaVersion -ne 2) {
-        throw "Inventory '$Path' has schema version $($inventory.schemaVersion); this build reads version 2. Run 'import' again."
+    if ($inventory.schemaVersion -ne 3) {
+        throw "Inventory '$Path' has schema version $($inventory.schemaVersion); this build reads version 3. Run 'import' again."
     }
     $inventory
 }

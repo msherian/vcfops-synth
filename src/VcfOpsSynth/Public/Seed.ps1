@@ -74,8 +74,9 @@ function New-SynthSeedPlan {
         names; the tag is what marks them as synthetic.
 
     .PARAMETER Tag
-        The vSphere tag every object carries, as Category and Name. It is written
-        to summary|tag and summary|tagJson.
+        The vSphere tags every object carries, each as Category and Name, for
+        example the synthetic marker and the project. They are written to
+        summary|tag and summary|tagJson.
 
     .PARAMETER CustomAdapterKind
         The toolset's own adapter kind, for standard switches and port groups,
@@ -96,7 +97,7 @@ function New-SynthSeedPlan {
         [Parameter(Mandatory)][hashtable]$Rubric,
         [Parameter(Mandatory)][string]$VcId,
         [AllowEmptyString()][string]$Prefix = '',
-        [System.Collections.IDictionary]$Tag = @{ Category = 'vcfops-synth'; Name = 'synthetic' },
+        [System.Collections.IDictionary[]]$Tag = @(@{ Category = 'vcfops-synth'; Name = 'synthetic' }),
         [string]$CustomAdapterKind = 'VcfOpsSynth',
         [AllowEmptyString()][string]$PhysicalDatacenter = ''
     )
@@ -119,13 +120,16 @@ function New-SynthSeedPlan {
     }
     $nameOf = { param($Id) if ($Id -and $names.ContainsKey($Id)) { $names[$Id] } else { '' } }
     $moidOf = { param($Id) if ($Id -and $byId.ContainsKey($Id)) { $byId[$Id].moid } else { & $nameOf $Id } }
-    $vcenter = Get-SynthRubricValue -Rubric $Rubric.Datacenter -Name 'summary|parentVcenter'
+    # The customer vCenter the export came from (RVTools VI SDK Server), when the inventory records it.
+    $vcenterName = if ($Inventory.Contains('source') -and $Inventory.source -is [System.Collections.IDictionary] -and $Inventory.source.Contains('vcenter')) { [string]$Inventory.source.vcenter } else { '' }
     $prepared = @{}
-    $renameKeys = 'config|name', 'summary|parentDatacenter', 'summary|parentCluster', 'summary|parentHost', 'summary|parentFolder', 'summary|folder', 'summary|datastore'
+    $tags = @($Tag | Where-Object { $_ -and $_.Category -and $_.Name })
     $tagSet = [ordered]@{
-        'summary|tag'     = "[<$($Tag.Category)-$($Tag.Name)>]"
-        'summary|tagJson' = ConvertTo-Json -Compress -InputObject @([ordered]@{ category = [string]$Tag.Category; name = [string]$Tag.Name })
+        # Operations strips anything in angle brackets from pushed values, so the vCenter adapter's <Category-Tag> form cannot be used.
+        'summary|tag'     = "[$(($tags | ForEach-Object { "$($_.Category)-$($_.Name)" }) -join ', ')]"
+        'summary|tagJson' = ConvertTo-Json -Compress -InputObject @($tags | ForEach-Object { [ordered]@{ category = [string]$_.Category; name = [string]$_.Name } })
     }
+    $context = Get-SynthDerivationContext -Inventory $Inventory
     $customKinds = Get-SynthSeedKind -Custom
 
     # Objects first, parents before children, so links and parent names can look each other up.
@@ -197,7 +201,10 @@ function New-SynthSeedPlan {
                 if ($item.vendor) { $set['hardware|vendor'] = $item.vendor }
                 if ($item.vendor -or $item.model) { $set['hardware|vendorModel'] = "$($item.vendor) $($item.model)".Trim() }
                 if ($item.esxVersion -match '(?<ver>\d+\.\d+\.\d+)\D+(?<build>\d+)') {
+                    # Every version key the reference host carries; the host summary card reads summary|version_4d.
                     $set['summary|version'] = "$($Matches.ver)-$($Matches.build)"
+                    $set['summary|version_4d'] = "$($Matches.ver).0.$($Matches.build)"
+                    $set['config|product|apiVersion'] = "$($Matches.ver).0"
                     $set['sys|build'] = $Matches.build
                 }
                 $set['runtime|maintenanceState'] = if ($item.maintenance) { 'inMaintenance' } else { 'notInMaintenance' }
@@ -242,52 +249,43 @@ function New-SynthSeedPlan {
             'VirtualMachine' {
                 $vmSet = Get-SynthVmProperty -Vm $item -Record $record -NameOf $nameOf
                 foreach ($key in $vmSet.Keys) { $set[$key] = $vmSet[$key] }
-                if ($item.host -and $byId.ContainsKey($item.host) -and $byId[$item.host].item.esxVersion -match '\d+\.\d+\.\d+') { $set['summary|parentHostVersion'] = $Matches[0] }
+                if ($item.host -and $byId.ContainsKey($item.host) -and $byId[$item.host].item.esxVersion -match '\d+\.\d+\.\d+') {
+                    $set['summary|parentHostVersion'] = $Matches[0]
+                    $set['summary|parentHostVersion4d'] = "$($Matches[0]).0"
+                }
                 $families = Get-SynthVmFamily -Vm $item -Record $record -NameOf $nameOf
             }
         }
         # Kinds with no rubric (a Physical Data Center, standard switches and port groups) carry only what the inventory says.
+        # A rubric only says which keys a kind has: every value comes from the inventory, is derived from it, or is a neutral placeholder.
         $hasRubric = $Rubric.ContainsKey($kind)
         $kindRubric = if ($hasRubric) { $Rubric[$kind] } else { @{ latest = @(); properties = @() } }
+        # RVTools configuration the inventory kept for this object (HA/DRS, port group policies, host hardware, ...).
+        $fromConfig = Get-SynthConfigProperty -Kind $kind -Item $item
+        foreach ($key in $fromConfig.Keys) { if (-not $set.Contains($key)) { $set[$key] = $fromConfig[$key] } }
         foreach ($key in $tagSet.Keys) { $set[$key] = $tagSet[$key] }
+        if ($vcenterName -and @($kindRubric.properties | Where-Object { $_.name -eq 'summary|parentVcenter' }).Count) { $set['summary|parentVcenter'] = $vcenterName }
         if (-not $prepared.ContainsKey($kind)) {
-            # Everything that depends only on the kind's rubric, worked out once instead of once per object.
-            $real = @{}
-            if ($kindRubric.Contains('sourceName') -and $kindRubric.sourceName) { $real['@self'] = [string]$kindRubric.sourceName }
-            foreach ($key in $renameKeys) {
-                $value = [string](Get-SynthRubricValue -Rubric $kindRubric -Name $key)
-                if ($value) { $real[$key] = $value }
-            }
-            $props = @($kindRubric.properties | ForEach-Object { @{ key = $_.name; value = (ConvertTo-SynthScrubbedValue -Key $_.name -Value $_.value) } })
+            # Worked out once per kind: the key list, each key's placeholder, and the per-instance templates.
+            $statEntries = @($kindRubric.latest | ForEach-Object { @{ key = $_.key; value = (Get-SynthPlaceholder -Value $_.value -Metric) } })
+            # Operations sets System Properties itself, so they are not pushed.
+            $propEntries = @($kindRubric.properties | Where-Object { $_.name -notlike 'System Properties|*' } | ForEach-Object { @{ key = $_.name; value = (Get-SynthPlaceholder -Value $_.value) } })
             $prepared[$kind] = @{
-                HasVcenter = [bool](Get-SynthRubricValue -Rubric $kindRubric -Name 'summary|parentVcenter')
-                Real       = $real
-                Stats      = Split-SynthRubricEntry -Entry @($kindRubric.latest | ForEach-Object { @{ key = $_.key; value = $_.value } }) -Family $families
-                Properties = Split-SynthRubricEntry -Entry $props -Family $families
+                Stats      = Split-SynthRubricEntry -Entry $statEntries -Family $families
+                Properties = Split-SynthRubricEntry -Entry $propEntries -Family $families
             }
         }
         $prep = $prepared[$kind]
-        if ($vcenter -and $prep.HasVcenter) { $set['summary|parentVcenter'] = $vcenter }
-
-        # The reference object's own and parent names, wherever else they appear (policy names, descriptions), become the synthetic ones.
-        $rename = [ordered]@{}
-        foreach ($key in $prep.Real.Keys) {
-            $target = if ($key -eq '@self') { $record.name } elseif ($set.Contains($key)) { [string]$set[$key] } else { '' }
-            if ($target -and $prep.Real[$key] -ne $target) { $rename[$prep.Real[$key]] = $target }
-        }
-        $renameOrder = @($rename.Keys | Sort-Object { $_.Length } -Descending)
 
         $record.identifiers = @(Get-SynthSeedIdentifier -Kind $kind -Record $record -VcId $VcId)
-        $record.stats = @(Join-SynthRubricEntry -Split $prep.Stats -Family $families)
+        $derived = Get-SynthDerivedStat -Kind $kind -Item $item -Context $context
+        $record.stats = @(foreach ($s in (Join-SynthRubricEntry -Split $prep.Stats -Family $families)) {
+                if ($derived.Contains($s.key)) { @{ key = $s.key; value = $derived[$s.key] } } else { $s }
+            })
         $seen = [System.Collections.Generic.HashSet[string]]::new()
         $record.properties = @(foreach ($p in (Join-SynthRubricEntry -Split $prep.Properties -Family $families)) {
                 $null = $seen.Add($p.key)
-                if ($set.Contains($p.key)) { @{ key = $p.key; value = $set[$p.key] }; continue }
-                $value = $p.value
-                if ($value -is [string] -and $renameOrder.Count) {
-                    foreach ($old in $renameOrder) { if ($value.Contains($old)) { $value = $value.Replace($old, $rename[$old]) } }
-                }
-                @{ key = $p.key; value = $value }
+                if ($set.Contains($p.key)) { @{ key = $p.key; value = $set[$p.key] } } else { $p }
             }
             # A kind with a rubric keeps exactly the rubric's keys, plus the tag; one without gets everything the inventory gave.
             foreach ($key in $set.Keys) {
@@ -363,6 +361,10 @@ function Invoke-SynthSeed {
     .PARAMETER AdapterInstanceId
         The vCenter adapter instance to create the objects under.
 
+    .PARAMETER Refresh
+        Also pushes the planned properties and current stats to objects that
+        already exist, so a fix to the plan reaches them without recreating them.
+
     .EXAMPLE
         Invoke-SynthSeed -Plan $plan -AdapterInstanceId $adapterId
     #>
@@ -370,11 +372,12 @@ function Invoke-SynthSeed {
     [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)][System.Collections.IDictionary]$Plan,
-        [Parameter(Mandatory)][string]$AdapterInstanceId
+        [Parameter(Mandatory)][string]$AdapterInstanceId,
+        [switch]$Refresh
     )
 
     $result = [ordered]@{
-        created = [ordered]@{}; existing = [ordered]@{}; renamed = [System.Collections.Generic.List[string]]::new()
+        created = [ordered]@{}; existing = [ordered]@{}; refreshed = 0; renamed = [System.Collections.Generic.List[string]]::new()
         failed = [System.Collections.Generic.List[string]]::new(); links = 0
     }
     # '@vcenter' in the plan's links is the adapter instance's own resource, the vCenter the datacenters sit under.
@@ -404,6 +407,15 @@ function Invoke-SynthSeed {
                 $result.existing[$kind]++
                 # Operations collapses runs of spaces in names, so only a difference beyond that counts.
                 if (($match.name -replace '\s+', ' ').Trim() -ne ($object.name -replace '\s+', ' ').Trim()) { $result.renamed.Add("$kind '$($match.name)' is planned as '$($object.name)'; delete it to reseed under the new name") }
+                if ($Refresh -and $PSCmdlet.ShouldProcess("$kind $($object.name)", 'Refresh properties and stats')) {
+                    try {
+                        $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+                        if (@($object.properties).Count) { $null = Invoke-SynthOpsRequest -Method Post -Path "resources/$($match.id)/properties" -Body @{ 'property-content' = @(ConvertTo-SynthSampleList -Entry $object.properties -Timestamp $now) } }
+                        if (@($object.stats).Count) { $null = Invoke-SynthOpsRequest -Method Post -Path "resources/$($match.id)/stats" -Body @{ 'stat-content' = @(ConvertTo-SynthSampleList -Entry $object.stats -Timestamp $now) } }
+                        $result.refreshed++
+                    }
+                    catch { $result.failed.Add("refresh $kind $($object.name): $($_.Exception.Message)") }
+                }
                 continue
             }
             if (-not $PSCmdlet.ShouldProcess("$kind $($object.name)", 'Create')) { continue }

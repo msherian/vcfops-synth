@@ -45,6 +45,21 @@ function Get-SynthRvtoolsColumnMap {
             osTools        = @{ Headers = @('OS according to the VMware Tools') }
             hwVersion      = @{ Headers = @('HW version') }
             creationDate   = @{ Headers = @('Creation date') }
+            # cfg* fields go to the object's config record for the seed's properties; see Get-SynthRvConfig.
+            cfgConnectionState     = @{ Headers = @('Connection state') }
+            cfgGuestState          = @{ Headers = @('Guest state') }
+            cfgHeartbeat           = @{ Headers = @('Heartbeat') }
+            cfgConsolidationNeeded = @{ Headers = @('Consolidation Needed') }
+            cfgCpuReadiness        = @{ Headers = @('Overall Cpu Readiness') }
+            cfgLatencySensitivity  = @{ Headers = @('Latency Sensitivity') }
+            cfgFirmware            = @{ Headers = @('Firmware') }
+            cfgEfiSecureBoot       = @{ Headers = @('EFI Secure boot') }
+            cfgCbt                 = @{ Headers = @('CBT') }
+            cfgFtState             = @{ Headers = @('FT State') }
+            cfgHaRestartPriority   = @{ Headers = @('HA Restart Priority') }
+            cfgNumMonitors         = @{ Headers = @('Num Monitors') }
+            cfgVideoRamKiB         = @{ Headers = @('Video Ram KiB') }
+            cfgCreationDate        = @{ Headers = @('Creation date') }
         }
         vCPU       = @{
             sockets        = @{ Headers = @('Sockets') }
@@ -94,6 +109,28 @@ function Get-SynthRvtoolsColumnMap {
             vendor      = @{ Headers = @('Vendor') }
             model       = @{ Headers = @('Model') }
             maintenance = @{ Headers = @('in Maintenance Mode') }
+            cfgConfigStatus     = @{ Headers = @('Config status') }
+            cfgQuarantine       = @{ Headers = @('in Quarantine Mode') }
+            cfgHtAvailable      = @{ Headers = @('HT Available') }
+            cfgHtActive         = @{ Headers = @('HT Active') }
+            cfgMemoryTiering    = @{ Headers = @('Memory Tiering Type') }
+            cfgVmotion          = @{ Headers = @('VMotion support') }
+            cfgStorageVmotion   = @{ Headers = @('Storage VMotion support') }
+            cfgCurrentEvc       = @{ Headers = @('Current EVC') }
+            cfgMaxEvc           = @{ Headers = @('Max EVC') }
+            cfgLicense          = @{ Headers = @('Assigned License(s)') }
+            cfgPowerPolicy      = @{ Headers = @('Current CPU power man. policy') }
+            cfgHostPowerPolicy  = @{ Headers = @('Host Power Policy') }
+            cfgBootTime         = @{ Headers = @('Boot time') }
+            cfgTimeZoneName     = @{ Headers = @('Time Zone Name') }
+            cfgSerial           = @{ Headers = @('Serial number') }
+            cfgServiceTag       = @{ Headers = @('Service tag') }
+            cfgBiosVendor       = @{ Headers = @('BIOS Vendor') }
+            cfgBiosVersion      = @{ Headers = @('BIOS Version') }
+            cfgBiosDate         = @{ Headers = @('BIOS Date') }
+            cfgCertExpiry       = @{ Headers = @('Certificate Expiry Date') }
+            cfgCertStatus       = @{ Headers = @('Certificate Status') }
+            cfgUuid             = @{ Headers = @('UUID') }
             server      = @{ Headers = @('VI SDK Server') }
         }
         vCluster   = @{
@@ -101,6 +138,18 @@ function Get-SynthRvtoolsColumnMap {
             datacenter = @{ Headers = @('Datacenter') }
             haEnabled  = @{ Headers = @('HA enabled') }
             drsEnabled = @{ Headers = @('DRS enabled') }
+            cfgOverallStatus       = @{ Headers = @('OverallStatus') }
+            cfgAdmissionControl    = @{ Headers = @('AdmissionControlEnabled') }
+            cfgFailoverLevel       = @{ Headers = @('Failover Level') }
+            cfgHostMonitoring      = @{ Headers = @('Host monitoring') }
+            cfgVmMonitoring        = @{ Headers = @('VM Monitoring') }
+            cfgIsolationResponse   = @{ Headers = @('Isolation Response') }
+            cfgRestartPriority     = @{ Headers = @('Restart Priority') }
+            cfgDrsBehavior         = @{ Headers = @('DRS default VM behavior') }
+            cfgDrsRate             = @{ Headers = @('DRS vmotion rate') }
+            cfgDpmEnabled          = @{ Headers = @('DPM enabled') }
+            cfgDpmBehavior         = @{ Headers = @('DPM default behavior') }
+            cfgNumVmotions         = @{ Headers = @('Num VMotions') }
             server     = @{ Headers = @('VI SDK Server') }
         }
         vDatastore = @{
@@ -110,6 +159,16 @@ function Get-SynthRvtoolsColumnMap {
             provisionedMiB = @{ Headers = @('Provisioned MiB', 'Provisioned MB') }
             inUseMiB       = @{ Headers = @('In Use MiB', 'In Use MB') }
             freeMiB        = @{ Headers = @('Free MiB', 'Free MB') }
+            cfgAccessible        = @{ Headers = @('Accessible') }
+            cfgConfigStatus      = @{ Headers = @('Config status') }
+            cfgSioc              = @{ Headers = @('SIOC enabled') }
+            cfgSiocThreshold     = @{ Headers = @('SIOC Threshold') }
+            cfgDatastoreCluster  = @{ Headers = @('Cluster name') }
+            cfgBlockSize         = @{ Headers = @('Block size') }
+            cfgExtents           = @{ Headers = @('# Extents') }
+            cfgMajorVersion      = @{ Headers = @('Major Version') }
+            cfgVersion           = @{ Headers = @('Version') }
+            cfgUrl               = @{ Headers = @('URL') }
             hosts          = @{ Headers = @('Hosts') }
             server         = @{ Headers = @('VI SDK Server') }
         }
@@ -156,6 +215,13 @@ function Get-SynthRvtoolsColumnMap {
             version     = @{ Headers = @('Version') }
             hostMembers = @{ Headers = @('Host members') }
             maxMtu      = @{ Headers = @('Max MTU') }
+            cfgVendor        = @{ Headers = @('Vendor') }
+            cfgDescription   = @{ Headers = @('Description') }
+            cfgCreated       = @{ Headers = @('Created') }
+            cfgMaxPorts      = @{ Headers = @('Max Ports') }
+            cfgCdpType       = @{ Headers = @('CDP Type') }
+            cfgCdpOperation  = @{ Headers = @('CDP Operation') }
+            cfgLacpMode      = @{ Headers = @('LACP Mode') }
             ports       = @{ Headers = @('# Ports') }
             server      = @{ Headers = @('VI SDK Server') }
         }
@@ -163,6 +229,20 @@ function Get-SynthRvtoolsColumnMap {
             portGroup = @{ Headers = @('Port'); Required = $true }
             switch    = @{ Headers = @('Switch') }
             type      = @{ Headers = @('Type') }
+            cfgAllowPromiscuous     = @{ Headers = @('Allow Promiscuous') }
+            cfgMacChanges           = @{ Headers = @('Mac Changes') }
+            cfgForgedTransmits      = @{ Headers = @('Forged Transmits') }
+            cfgActiveUplink         = @{ Headers = @('Active Uplink') }
+            cfgStandbyUplink        = @{ Headers = @('Standby Uplink') }
+            cfgPolicy               = @{ Headers = @('Policy') }
+            cfgBlockOverride        = @{ Headers = @('Block Override') }
+            cfgConfigReset          = @{ Headers = @('Config Reset') }
+            cfgShapingOverride      = @{ Headers = @('Shaping Override') }
+            cfgVendorConfigOverride = @{ Headers = @('Vendor Config Override') }
+            cfgSecPolicyOverride    = @{ Headers = @('Sec. Policy Override') }
+            cfgTeamingOverride      = @{ Headers = @('Teaming Override') }
+            cfgVlanOverride         = @{ Headers = @('Vlan Override') }
+            cfgLivePortMoving       = @{ Headers = @('Live Port Moving') }
             ports     = @{ Headers = @('# Ports') }
             vlan      = @{ Headers = @('VLAN') }
             server    = @{ Headers = @('VI SDK Server') }
