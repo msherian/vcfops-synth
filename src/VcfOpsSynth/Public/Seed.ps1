@@ -267,7 +267,8 @@ function New-SynthSeedPlan {
         if ($vcenterName -and @($kindRubric.properties | Where-Object { $_.name -eq 'summary|parentVcenter' }).Count) { $set['summary|parentVcenter'] = $vcenterName }
         if (-not $prepared.ContainsKey($kind)) {
             # Worked out once per kind: the key list, each key's placeholder, and the per-instance templates.
-            $statEntries = @($kindRubric.latest | ForEach-Object { @{ key = $_.key; value = (Get-SynthPlaceholder -Value $_.value -Metric) } })
+            # Operations computes its own analytics (capacity, badges, alert counts, ...); pushing them would mask its results.
+            $statEntries = @($kindRubric.latest | Where-Object { -not (Test-SynthComputedStatKey -Key $_.key) } | ForEach-Object { @{ key = $_.key; value = (Get-SynthPlaceholder -Value $_.value -Metric) } })
             # Operations sets System Properties itself, so they are not pushed.
             $propEntries = @($kindRubric.properties | Where-Object { $_.name -notlike 'System Properties|*' } | ForEach-Object { @{ key = $_.name; value = (Get-SynthPlaceholder -Value $_.value) } })
             $prepared[$kind] = @{

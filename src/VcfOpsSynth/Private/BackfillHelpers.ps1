@@ -38,7 +38,7 @@ function Get-SynthCalibration {
             & $pair @('cpu|usage_average', 'cpu|demandPct') (& $get 'cpuAvgPct') (& $get 'cpuPeakPct') 1 100
             if ($capMhz) { & $pair @('cpu|usagemhz_average', 'cpu|demandmhz') (& $get 'cpuAvgPct') (& $get 'cpuPeakPct') ($capMhz / 100) $nan }
             & $pair @('mem|usage_average') (& $get 'memAvgPct') (& $get 'memPeakPct') 1 100
-            if ($memKb) { & $pair @('mem|active_average', 'mem|host_demand') (& $get 'memAvgPct') (& $get 'memPeakPct') ($memKb / 100) $nan }
+            if ($memKb) { & $pair @('mem|active_average', 'mem|host_demand', 'mem|guest_demand', 'mem|vmMemoryDemand') (& $get 'memAvgPct') (& $get 'memPeakPct') ($memKb / 100) $nan }
             & $pair @('virtualDisk|numberReadAveraged_average') (& $get 'readIopsAvg') (& $get 'readIopsPeak') 1 $nan
             & $pair @('virtualDisk|numberWriteAveraged_average') (& $get 'writeIopsAvg') (& $get 'writeIopsPeak') 1 $nan
             & $pair @('virtualDisk|read_average') (& $get 'readMBpsAvg') (& $get 'readMBpsPeak') 1024 $nan
@@ -50,9 +50,9 @@ function Get-SynthCalibration {
             $capMhz = [double]$(if ($Item.cores) { $Item.cores } else { 0 }) * [double]$(if ($Item.cpuMhz) { $Item.cpuMhz } else { 0 })
             $memKb = [double]$(if ($Item.memoryMiB) { $Item.memoryMiB } else { 0 }) * 1024
             & $pair @('cpu|usage_average', 'cpu|demandPct', 'cpu|capacity_usagepct_average') (& $get 'cpuAvgPct') (& $get 'cpuPeakPct') 1 100
-            if ($capMhz) { & $pair @('cpu|usagemhz_average', 'cpu|demandmhz') (& $get 'cpuAvgPct') (& $get 'cpuPeakPct') ($capMhz / 100) $nan }
+            if ($capMhz) { & $pair @('cpu|usagemhz_average', 'cpu|demandmhz', 'cpu|demand_without_overhead') (& $get 'cpuAvgPct') (& $get 'cpuPeakPct') ($capMhz / 100) $nan }
             & $pair @('mem|usage_average', 'mem|host_usagePct') (& $get 'memAvgPct') (& $get 'memPeakPct') 1 100
-            if ($memKb) { & $pair @('mem|consumed_average', 'mem|host_usage') (& $get 'memAvgPct') (& $get 'memPeakPct') ($memKb / 100) $nan }
+            if ($memKb) { & $pair @('mem|consumed_average', 'mem|host_usage', 'mem|host_demand') (& $get 'memAvgPct') (& $get 'memPeakPct') ($memKb / 100) $nan }
             & $pair @('storage|commandsAveraged_average') (& $get 'iopsAvg') (& $get 'iopsPeak') 1 $nan
             & $pair @('storage|usage_average') (& $get 'throughputAvgMBps') (& $get 'throughputPeakMBps') 1024 $nan
             & $pair @('storage|totalReadLatency_average') (& $get 'readLatencyAvgMs') (& $get 'readLatencyPeakMs') 1 $nan
@@ -79,6 +79,8 @@ function Get-SynthSeriesMode {
     $leaf = ($Key -split '\|')[-1]
     $percent = $leaf -match '(?i)pct|percent' -or $Key -match '^(cpu|mem)\|usage_average$'
     $cap = if ($percent) { 100 } else { [double]::NaN }
+    # Capacity stays put: totalCapacity_average is a size, though its name ends in _average.
+    if ($leaf -match '(?i)capacity|provisioned|usable' -and $leaf -notmatch '(?i)pct|percent|usage|used|contention|demand|consumer') { return @{ Mode = [VcfOpsSynth.SeriesMode]::Constant; Cap = $cap } }
     # Space in use first: total_usage and a guest file system's usage are space, not activity.
     if ($leaf -match '(?i)^(used|usage|diskused|used_space|usage_total|total_usage|percentage|percentage_total|usedSpacePct|snapshot.*|otherused|consumer_provisioned)$') { return @{ Mode = [VcfOpsSynth.SeriesMode]::Ramp; Cap = $cap } }
     if ($leaf -match '(?i)usage|demand|contention|ready|latency|average|rate|_ratio|workload|load|active|swap|balloon') { return @{ Mode = [VcfOpsSynth.SeriesMode]::Activity; Cap = $cap } }

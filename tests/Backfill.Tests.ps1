@@ -170,6 +170,28 @@ Describe 'Backfill specs' {
     }
 }
 
+Describe 'Keys Operations computes' {
+    It 'leaves analytics, badges and capacity results to Operations' {
+        InModuleScope VcfOpsSynth {
+            foreach ($k in 'OnlineCapacityAnalytics|timeRemaining', 'OnlineCapacityAnalytics|mem|demand|capacityRemaining', 'badge|health', 'System Attributes|total_alert_count', 'cpu|demand|workload', 'mem|demand|active_shortterm_load', 'cpu|demand|usableCapacity', 'reclaimable|vm_count', 'rightsizing|cpu|recommendation') {
+                Test-SynthComputedStatKey -Key $k | Should -BeTrue -Because $k
+            }
+            foreach ($k in 'cpu|demandmhz', 'mem|host_usable', 'mem|host_demand', 'capacity|usableCapacity', 'diskspace|total|usableCapacity', 'cpu|totalCapacity_average') {
+                Test-SynthComputedStatKey -Key $k | Should -BeFalse -Because $k
+            }
+        }
+    }
+
+    It 'keeps capacity flat in the backfill, even when the name ends in _average' {
+        InModuleScope VcfOpsSynth {
+            foreach ($k in 'cpu|totalCapacity_average', 'cpu|haTotalCapacity_average', 'mem|host_usable', 'cpu|capacity_provisioned', 'diskspace|total_capacity') {
+                "$((Get-SynthSeriesMode -Key $k).Mode)" | Should -Be 'Constant' -Because $k
+            }
+            "$((Get-SynthSeriesMode -Key 'cpu|capacity_usagepct_average').Mode)" | Should -Be 'Activity'
+            "$((Get-SynthSeriesMode -Key 'mem|host_demand').Mode)" | Should -Be 'Activity'
+        }
+    }
+}
 Describe 'Get-SynthBackfillRange' {
     It 'ends at the last whole interval before now and holds Days of points' {
         $r = Get-SynthBackfillRange -Days 30 -IntervalMinutes 5 -Now ([DateTimeOffset]::new(2026, 10, 15, 12, 7, 30, [TimeSpan]::Zero))
