@@ -201,7 +201,20 @@ namespace VcfOpsSynth
                         double mean = 0, max = double.MinValue;
                         for (int i = 0; i < n; i++) { mean += shape[i]; if (shape[i] > max) max = shape[i]; }
                         mean /= n;
-                        if (s.Mode == SeriesMode.Activity || s.B <= s.A || max <= mean || mean <= 0)
+                        if (s.Mode == SeriesMode.Calibrated && s.A <= 0)
+                        {
+                            // LiveOptics says 0 on average yet peaked at B: one spike at the busiest point, zero elsewhere.
+                            // The mean is B/n, which still rounds to the reported 0.
+                            int top = 0;
+                            for (int i = 1; i < n; i++) if (shape[i] > shape[top]) top = i;
+                            if (s.B > 0) v[top] = s.B;
+                        }
+                        else if (s.Mode == SeriesMode.Calibrated && s.B <= s.A)
+                        {
+                            // The peak is the average: a flat line, not the curve's own peaks.
+                            for (int i = 0; i < n; i++) v[i] = s.A;
+                        }
+                        else if (s.Mode == SeriesMode.Activity || max <= mean || mean <= 0)
                         {
                             // Mean matches A; the curve keeps its own peaks.
                             double scale = mean > 0 ? s.A / mean : 0;

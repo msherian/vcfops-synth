@@ -45,6 +45,20 @@ Describe 'Backfill engine' {
         }
     }
 
+    It 'stays flat when the LiveOptics peak is the average, rather than keeping the curve''s own peaks' {
+        foreach ($workload in 'business-hours', 'bursty', 'steady') {
+            $m = Get-Curve (New-TestObjectSpec -Key "vm-$workload" -WorkloadProfile $workload) (New-TestSeries -Key 'mem|usage_average' -Mode Calibrated -A 45 -B 45 -Cap 100) | Measure-Object -Average -Maximum -Minimum
+            "$($m.Minimum) $($m.Average) $($m.Maximum)" | Should -Be '45 45 45' -Because $workload
+        }
+    }
+
+    It 'keeps a LiveOptics peak when the average is 0: one spike at the busiest point, zero elsewhere' {
+        $v = Get-Curve (New-TestObjectSpec) (New-TestSeries -Key 'virtualDisk|write_average' -Mode Calibrated -A 0 -B 51200 -Cap ([double]::NaN))
+        ($v | Measure-Object -Maximum).Maximum | Should -Be 51200
+        @($v | Where-Object { $_ -gt 0 }).Count | Should -Be 1
+        ($v | Measure-Object -Average).Average | Should -BeLessThan 6
+    }
+
     It 'follows the profile: busy weekday working hours, quiet nights' {
         $v = Get-Curve (New-TestObjectSpec) (New-TestSeries -Key 'cpu|usage_average' -Mode Calibrated -A 10 -B 80 -Cap 100)
         $day = 0.0; $dayN = 0; $night = 0.0; $nightN = 0
