@@ -48,6 +48,11 @@
         'ConvertTo-SynthSymptomBody'
         'ConvertTo-SynthAlertBody'
         'Publish-SynthAlertContent'
+        'Get-SynthSla'
+        'Get-SynthPolicyDefinition'
+        'ConvertTo-SynthPolicyXml'
+        'ConvertTo-SynthPolicySettingsBody'
+        'Publish-SynthPolicy'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

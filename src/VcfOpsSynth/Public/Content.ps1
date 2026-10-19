@@ -1,40 +1,51 @@
 function Get-SynthGroupDefinition {
     <#
     .SYNOPSIS
-        The custom groups the toolset publishes: one per tier, one per application, and the scenario targets.
+        The custom groups the toolset publishes: the whole synthetic estate, one per tier, one per application, and the scenario targets.
 
     .DESCRIPTION
         Membership is dynamic, on the vcfops-synth|tier and vcfops-synth|application
         properties seed writes on each VM, so a re-import with new tier rules followed
-        by seed -Refresh moves VMs between groups without touching the groups. Names
+        by seed -Refresh moves VMs between groups without touching the groups. The
+        estate group matches the synthetic tag on VMs, hosts, clusters and datastores
+        (a lab check showed a tag rule matches the summary|tag seed writes). Names
         carry the content prefix so reset can find them; tiers are numbered so they
-        sort Gold, Silver, Bronze.
+        sort Gold, Silver, Bronze. Policy names the policy definition (Get-SynthPolicyDefinition
+        key) the group gets: Base for the estate, the tier for a tier group.
 
     .PARAMETER Inventory
         The inventory model; its applications become groups.
 
     .PARAMETER Prefix
         The content prefix (lab.json prefix).
+
+    .PARAMETER Tag
+        The synthetic tag seed writes (lab.json seed.tag), with category and name.
     #>
     [CmdletBinding()]
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param(
         [Parameter(Mandatory)][System.Collections.IDictionary]$Inventory,
-        [string]$Prefix = 'Synth-'
+        [string]$Prefix = 'Synth-',
+        [System.Collections.IDictionary]$Tag = @{ category = 'vcfops-synth'; name = 'synthetic' }
     )
 
     $rule = { param($Key, $Value) [ordered]@{ Kind = 'VirtualMachine'; AdapterKind = 'VMWARE'; Key = $Key; Value = $Value } }
+    $tagRules = foreach ($kind in 'VirtualMachine', 'HostSystem', 'ClusterComputeResource', 'Datastore') {
+        [ordered]@{ Kind = $kind; AdapterKind = 'VMWARE'; TagCategory = [string]$Tag.category; TagValue = [string]$Tag.name }
+    }
+    [ordered]@{ Name = "${Prefix}Estate"; Type = 'Environment'; Tier = $null; Policy = 'Base'; Rules = @($tagRules) }
     $n = 0
     foreach ($tier in 'Gold', 'Silver', 'Bronze') {
         $n++
-        [ordered]@{ Name = "${Prefix}Tier-$n-$tier"; Type = 'Service Level Objective'; Tier = $tier; Rule = (& $rule 'vcfops-synth|tier' $tier) }
+        [ordered]@{ Name = "${Prefix}Tier-$n-$tier"; Type = 'Service Level Objective'; Tier = $tier; Policy = $tier; Rules = @(& $rule 'vcfops-synth|tier' $tier) }
     }
     $apps = @($Inventory.vms | ForEach-Object { if ($_.Contains('application') -and $_.application) { [string]$_.application } } | Sort-Object -Unique)
     foreach ($app in $apps) {
-        [ordered]@{ Name = "${Prefix}App-$app"; Type = 'Function'; Tier = $null; Rule = (& $rule 'vcfops-synth|application' $app) }
+        [ordered]@{ Name = "${Prefix}App-$app"; Type = 'Function'; Tier = $null; Policy = $null; Rules = @(& $rule 'vcfops-synth|application' $app) }
     }
     # Scenario overlays (Phase 6) mark their targets with vcfops-synth|scenario.
-    [ordered]@{ Name = "${Prefix}Noisy-Neighbours"; Type = 'Environment'; Tier = $null; Rule = (& $rule 'vcfops-synth|scenario' 'noisy-neighbour') }
+    [ordered]@{ Name = "${Prefix}Noisy-Neighbours"; Type = 'Environment'; Tier = $null; Policy = $null; Rules = @(& $rule 'vcfops-synth|scenario' 'noisy-neighbour') }
 }
 
 function ConvertTo-SynthGroupBody {
@@ -57,9 +68,11 @@ function ConvertTo-SynthGroupBody {
             includedResources         = @()
             excludedResources         = @()
             'custom-group-properties' = @()
-            rules                     = @([ordered]@{
-                    resourceKindKey        = [ordered]@{ resourceKind = $Definition.Rule.Kind; adapterKind = $Definition.Rule.AdapterKind }
-                    propertyConditionRules = @([ordered]@{ key = $Definition.Rule.Key; stringValue = $Definition.Rule.Value; compareOperator = 'EQ' })
+            rules                     = @(foreach ($r in $Definition.Rules) {
+                    $one = [ordered]@{ resourceKindKey = [ordered]@{ resourceKind = $r.Kind; adapterKind = $r.AdapterKind } }
+                    if ($r.Contains('TagCategory')) { $one.resourceTagConditionRules = @([ordered]@{ category = $r.TagCategory; stringValue = $r.TagValue; compareOperator = 'EQ' }) }
+                    else { $one.propertyConditionRules = @([ordered]@{ key = $r.Key; stringValue = $r.Value; compareOperator = 'EQ' }) }
+                    $one
                 })
         }
     }
