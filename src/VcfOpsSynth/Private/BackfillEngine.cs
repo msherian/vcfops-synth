@@ -302,10 +302,21 @@ namespace VcfOpsSynth
             }
         }
 
-        // Generates and posts each object's history, several objects at a time. 429 and 5xx are retried;
+        // Seconds to wait before retry number attempt (1 = the first): Retry-After when the server gives it,
+        // else 2, 4, 8, 16 and so on, capped at maxDelaySeconds.
+        public static int RetryDelaySeconds(int attempt, int maxDelaySeconds, TimeSpan? retryAfter)
+        {
+            int cap = Math.Max(1, maxDelaySeconds);
+            if (retryAfter.HasValue && retryAfter.Value > TimeSpan.Zero) return (int)Math.Min(cap, Math.Ceiling(retryAfter.Value.TotalSeconds));
+            return (int)Math.Min(cap, 2L << Math.Min(30, Math.Max(0, attempt - 1)));
+        }
+
+        // Generates and posts each object's history, several objects at a time. 429 and 5xx are retried up to
+        // maxRetries times per body, so a busy Operations that refuses writes for a few minutes is waited out;
         // any other failure stops that object and is reported, so the caller can sign in again or retry.
         public static PushResult[] Run(string baseUri, string token, bool skipCertificateCheck, ObjectSpec[] objects,
-            long startMs, int stepMs, int points, string timeZoneId, int concurrency, int maxSamples, int timeoutSeconds)
+            long startMs, int stepMs, int points, string timeZoneId, int concurrency, int maxSamples, int timeoutSeconds,
+            int maxRetries, int maxDelaySeconds)
         {
             var how = HourOfWeek(startMs, stepMs, points, timeZoneId);
             var handler = new HttpClientHandler();
@@ -346,7 +357,7 @@ namespace VcfOpsSynth
                                         catch (Exception e) { status = 599; detail = e.Message; }
                                         if (status >= 200 && status < 300) { r.Calls++; resp?.Dispose(); break; }
                                         bool retry = status == 429 || status >= 500;
-                                        if (!retry || attempt >= 4)
+                                        if (!retry || attempt >= maxRetries)
                                         {
                                             if (resp != null && detail == null) { try { detail = await resp.Content.ReadAsStringAsync().ConfigureAwait(false); } catch { } }
                                             resp?.Dispose();
@@ -354,9 +365,10 @@ namespace VcfOpsSynth
                                             r.Error = detail == null ? "HTTP " + status : ("HTTP " + status + ": " + (detail.Length > 300 ? detail.Substring(0, 300) : detail));
                                             goto done;
                                         }
+                                        TimeSpan? retryAfter = resp?.Headers.RetryAfter?.Delta;
                                         resp?.Dispose();
                                         attempt++;
-                                        await Task.Delay(Math.Min(60000, 2000 * (1 << (attempt - 1)))).ConfigureAwait(false);
+                                        await Task.Delay(1000 * RetryDelaySeconds(attempt, maxDelaySeconds, retryAfter)).ConfigureAwait(false);
                                     }
                                 }
                             }

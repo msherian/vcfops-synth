@@ -231,6 +231,16 @@ Describe 'Get-SynthBackfillRange' {
     }
 }
 
+Describe 'Backfill engine retry delay' {
+    It 'doubles from 2 seconds up to the cap' {
+        @(1..7 | ForEach-Object { [VcfOpsSynth.Backfill]::RetryDelaySeconds($_, 60, $null) }) -join ',' | Should -Be '2,4,8,16,32,60,60'
+    }
+    It 'takes Retry-After when the server gives it, within the cap' {
+        [VcfOpsSynth.Backfill]::RetryDelaySeconds(1, 60, [TimeSpan]::FromSeconds(25)) | Should -Be 25
+        [VcfOpsSynth.Backfill]::RetryDelaySeconds(1, 60, [TimeSpan]::FromSeconds(300)) | Should -Be 60
+    }
+}
+
 Describe 'Invoke-SynthBackfill' {
     BeforeAll {
         $script:specs = [VcfOpsSynth.ObjectSpec[]]@(1..5 | ForEach-Object { New-TestObjectSpec -Key "vm-$_" -Series @(New-TestSeries -Key 'cpu|usage_average' -Mode Constant -A 1) })
@@ -288,6 +298,43 @@ Describe 'Invoke-SynthBackfill' {
         $result.failed | Should -HaveCount 1
         $result.failed[0] | Should -BeLike 'vm-3: HTTP 400*'
         @((Get-Content $script:statePath -Raw | ConvertFrom-Json).backfill.done) | Should -Not -Contain 'vm-3'
+        # A 400 is not busy, so no retry pass.
+        Should -Invoke -ModuleName VcfOpsSynth Invoke-SynthBackfillEngine -Times 1
+    }
+
+    It 'gives objects refused as busy more passes, one at a time, after a wait' {
+        $script:busyLeft = 2
+        Mock -ModuleName VcfOpsSynth Start-Sleep { }
+        Mock -ModuleName VcfOpsSynth Invoke-SynthBackfillEngine {
+            foreach ($o in $Batch) {
+                $r = [VcfOpsSynth.PushResult]::new(); $r.Key = $o.Key
+                if ($o.Key -eq 'vm-4' -and $script:busyLeft -gt 0) { $script:busyLeft--; $r.Status = 500; $r.Error = 'HTTP 500: busy' } else { $r.Calls = 1; $r.Samples = 8640 }
+                $r
+            }
+        }
+        $result = Invoke-SynthBackfill -Spec $script:specs -Range $script:range -StatePath $script:statePath -RetryPasses 2 -MaxRetryDelaySeconds 30
+        $result.objects | Should -Be 5
+        $result.failed.Count | Should -Be 0
+        Should -Invoke -ModuleName VcfOpsSynth Invoke-SynthBackfillEngine -Times 2 -ParameterFilter { $Concurrency -eq 1 -and $Batch.Count -eq 1 -and $Batch[0].Key -eq 'vm-4' }
+        Should -Invoke -ModuleName VcfOpsSynth Start-Sleep -Times 2 -ParameterFilter { $Seconds -eq 30 }
+        @((Get-Content $script:statePath -Raw | ConvertFrom-Json).backfill.done) | Should -Contain 'vm-4'
+    }
+
+    It 'reports an object still busy after the last pass, once' {
+        Mock -ModuleName VcfOpsSynth Start-Sleep { }
+        Mock -ModuleName VcfOpsSynth Invoke-SynthBackfillEngine {
+            foreach ($o in $Batch) { $r = [VcfOpsSynth.PushResult]::new(); $r.Key = $o.Key; if ($o.Key -eq 'vm-1') { $r.Status = 500; $r.Error = 'HTTP 500: busy' } else { $r.Calls = 1; $r.Samples = 8640 }; $r }
+        }
+        $result = Invoke-SynthBackfill -Spec $script:specs -Range $script:range -StatePath $script:statePath -RetryPasses 1
+        $result.objects | Should -Be 4
+        $result.failed | Should -HaveCount 1
+        $result.failed[0] | Should -BeLike 'vm-1: HTTP 500*'
+        Should -Invoke -ModuleName VcfOpsSynth Invoke-SynthBackfillEngine -Times 2
+    }
+
+    It 'hands the retry settings to the engine' {
+        $null = Invoke-SynthBackfill -Spec $script:specs -Range $script:range -StatePath $script:statePath -MaxRetries 7 -MaxRetryDelaySeconds 90
+        Should -Invoke -ModuleName VcfOpsSynth Invoke-SynthBackfillEngine -ParameterFilter { $MaxRetries -eq 7 -and $MaxRetryDelaySeconds -eq 90 }
     }
 
     It 'pushes nothing with -WhatIf' {

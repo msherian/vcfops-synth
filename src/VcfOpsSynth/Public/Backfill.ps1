@@ -76,6 +76,12 @@ function Invoke-SynthBackfill {
         it left off over the same time range; a token rejected mid-run is renewed
         and the batch's failures retried once.
 
+        A busy Operations (seen on a lab node short of memory) answers some posts
+        with HTTP 500 for minutes at a time. Each post is retried up to MaxRetries
+        times with waits growing to MaxRetryDelaySeconds, and objects still refused
+        as busy (429 or 5xx) get up to RetryPasses more tries at the end of the run,
+        one object at a time.
+
         Run Connect-SynthOps first.
 
     .PARAMETER Spec
@@ -99,6 +105,16 @@ function Invoke-SynthBackfill {
     .PARAMETER MaxSamplesPerCall
         Upper bound on samples in one POST.
 
+    .PARAMETER MaxRetries
+        Retries of one POST answered with 429 or 5xx before the object is given up for this pass.
+
+    .PARAMETER MaxRetryDelaySeconds
+        Longest wait between retries; the waits are 2, 4, 8 seconds and so on up to this, or Retry-After.
+
+    .PARAMETER RetryPasses
+        Passes at the end of the run over the objects refused as busy, one object at a time,
+        each after a wait of MaxRetryDelaySeconds.
+
     .EXAMPLE
         Invoke-SynthBackfill -Spec $spec -Range (Get-SynthBackfillRange -Days 30) -StatePath ./data/state.json
     #>
@@ -111,7 +127,10 @@ function Invoke-SynthBackfill {
         [string]$TimeZone = 'Europe/Dublin',
         [ValidateRange(1, 32)][int]$Concurrency = 4,
         [ValidateRange(1, 1000)][int]$BatchSize = 20,
-        [ValidateRange(1000, 5000000)][int]$MaxSamplesPerCall = 500000
+        [ValidateRange(1000, 5000000)][int]$MaxSamplesPerCall = 500000,
+        [ValidateRange(0, 30)][int]$MaxRetries = 10,
+        [ValidateRange(1, 600)][int]$MaxRetryDelaySeconds = 60,
+        [ValidateRange(0, 10)][int]$RetryPasses = 2
     )
 
     if (-not $script:OpsSession) { throw 'Not signed in to VCF Operations; run Connect-SynthOps first.' }
@@ -122,41 +141,60 @@ function Invoke-SynthBackfill {
     if (-not $todo.Count) { return $result }
     if (-not $PSCmdlet.ShouldProcess("$($todo.Count) objects, $($state.range.Points) points each", 'Backfill history')) { return $result }
 
+    $engine = @{ State = $state; TimeZone = $TimeZone; MaxSamplesPerCall = $MaxSamplesPerCall; MaxRetries = $MaxRetries; MaxRetryDelaySeconds = $MaxRetryDelaySeconds }
+    # The last failure of each object not done, by key; a later pass replaces or clears it.
+    $failure = [ordered]@{}
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    for ($i = 0; $i -lt $todo.Count; $i += $BatchSize) {
-        $batch = [VcfOpsSynth.ObjectSpec[]]@($todo[$i..([math]::Min($i + $BatchSize, $todo.Count) - 1)])
-        $batchStart = $clock.Elapsed
-        # A cheap call first, so an expired token is renewed before the engine uses it.
-        $null = Invoke-SynthOpsRequest -Method Get -Path 'versions/current'
-        $outcome = @(Invoke-SynthBackfillEngine -Batch $batch -State $state -TimeZone $TimeZone -Concurrency $Concurrency -MaxSamplesPerCall $MaxSamplesPerCall)
-        $rejected = @($outcome | Where-Object { $_.Status -eq 401 })
-        if ($rejected.Count) {
-            $null = Connect-SynthOps -Config $script:OpsSession.Config -Password $script:OpsSession.Password
-            $retry = [VcfOpsSynth.ObjectSpec[]]@($batch | Where-Object { $_.Key -in @($rejected | ForEach-Object Key) })
-            $again = @{}
-            foreach ($r in (Invoke-SynthBackfillEngine -Batch $retry -State $state -TimeZone $TimeZone -Concurrency $Concurrency -MaxSamplesPerCall $MaxSamplesPerCall)) { $again[$r.Key] = $r }
-            $outcome = @($outcome | ForEach-Object { if ($again.ContainsKey($_.Key)) { $again[$_.Key] } else { $_ } })
+    $passes = @(@{ Name = ''; Objects = $todo; Concurrency = $Concurrency })
+    for ($pass = 0; $pass -lt $passes.Count; $pass++) {
+        $list = @($passes[$pass].Objects)
+        if ($pass) {
+            Write-Verbose ('{0:HH:mm:ss}Z {1}: {2} objects refused as busy; trying again one at a time in {3} s' -f [DateTime]::UtcNow, $passes[$pass].Name, $list.Count, $MaxRetryDelaySeconds)
+            Start-Sleep -Seconds $MaxRetryDelaySeconds
         }
-        foreach ($r in $outcome) {
-            $result.calls += $r.Calls
-            if ($r.Status -eq 0) {
-                $result.objects++
-                $result.samples += $r.Samples
-                $null = $done.Add($r.Key)
+        $passSamples = 0L
+        $passClock = [Diagnostics.Stopwatch]::StartNew()
+        for ($i = 0; $i -lt $list.Count; $i += $BatchSize) {
+            $batch = [VcfOpsSynth.ObjectSpec[]]@($list[$i..([math]::Min($i + $BatchSize, $list.Count) - 1)])
+            $batchStart = $clock.Elapsed
+            # A cheap call first, so an expired token is renewed before the engine uses it.
+            $null = Invoke-SynthOpsRequest -Method Get -Path 'versions/current'
+            $outcome = @(Invoke-SynthBackfillEngine -Batch $batch -Concurrency $passes[$pass].Concurrency @engine)
+            $rejected = @($outcome | Where-Object { $_.Status -eq 401 })
+            if ($rejected.Count) {
+                $null = Connect-SynthOps -Config $script:OpsSession.Config -Password $script:OpsSession.Password
+                $retry = [VcfOpsSynth.ObjectSpec[]]@($batch | Where-Object { $_.Key -in @($rejected | ForEach-Object Key) })
+                $again = @{}
+                foreach ($r in (Invoke-SynthBackfillEngine -Batch $retry -Concurrency $passes[$pass].Concurrency @engine)) { $again[$r.Key] = $r }
+                $outcome = @($outcome | ForEach-Object { if ($again.ContainsKey($_.Key)) { $again[$_.Key] } else { $_ } })
             }
-            else { $result.failed.Add("$($r.Key): $($r.Error)") }
+            foreach ($r in $outcome) {
+                $result.calls += $r.Calls
+                if ($r.Status -eq 0) {
+                    $result.objects++
+                    $result.samples += $r.Samples
+                    $passSamples += $r.Samples
+                    $null = $done.Add($r.Key)
+                    $failure.Remove($r.Key)
+                }
+                else { $failure[$r.Key] = $r }
+            }
+            $state.done = @($done)
+            Save-SynthBackfillState -Path $StatePath -State $state
+            $finished = [math]::Min($i + $BatchSize, $list.Count)
+            $rate = if ($passClock.Elapsed.TotalSeconds -gt 0) { $passSamples / $passClock.Elapsed.TotalSeconds } else { 0 }
+            Write-Progress -Activity "Backfilling history$($passes[$pass].Name)" -Status ('{0} of {1} objects, {2:N0} samples ({3:N0}/s)' -f $finished, $list.Count, $passSamples, $rate) -PercentComplete ($finished / $list.Count * 100)
+            # Time of day, batch duration and an estimate of the rest, to see how each batch is going.
+            $batchSeconds = ($clock.Elapsed - $batchStart).TotalSeconds
+            $left = if ($finished) { [TimeSpan]::FromSeconds($passClock.Elapsed.TotalSeconds / $finished * ($list.Count - $finished)) } else { [TimeSpan]::Zero }
+            Write-Verbose ('{0:HH:mm:ss}Z {1}{2} of {3} objects, {4:N0} samples, {5:N0} samples/s; batch {6:N1} s, about {7:hh\:mm\:ss} left' -f [DateTime]::UtcNow, $(if ($pass) { "$($passes[$pass].Name): " }), $finished, $list.Count, $passSamples, $rate, $batchSeconds, $left)
         }
-        $state.done = @($done)
-        Save-SynthBackfillState -Path $StatePath -State $state
-        $finished = [math]::Min($i + $BatchSize, $todo.Count)
-        $rate = if ($clock.Elapsed.TotalSeconds -gt 0) { $result.samples / $clock.Elapsed.TotalSeconds } else { 0 }
-        Write-Progress -Activity 'Backfilling history' -Status ('{0} of {1} objects, {2:N0} samples ({3:N0}/s)' -f $finished, $todo.Count, $result.samples, $rate) -PercentComplete ($finished / $todo.Count * 100)
-        # Time of day, batch duration and an estimate of the rest, to see how each batch is going.
-        $batchSeconds = ($clock.Elapsed - $batchStart).TotalSeconds
-        $left = if ($finished) { [TimeSpan]::FromSeconds($clock.Elapsed.TotalSeconds / $finished * ($todo.Count - $finished)) } else { [TimeSpan]::Zero }
-        Write-Verbose ('{0:HH:mm:ss}Z {1} of {2} objects, {3:N0} samples, {4:N0} samples/s; batch {5:N1} s, about {6:hh\:mm\:ss} left' -f [DateTime]::UtcNow, $finished, $todo.Count, $result.samples, $rate, $batchSeconds, $left)
+        # Objects refused as busy get another pass, one at a time, while passes are left.
+        $busy = @($list | Where-Object { $failure.Contains($_.Key) -and ($failure[$_.Key].Status -eq 429 -or $failure[$_.Key].Status -ge 500) })
+        if ($busy.Count -and $passes.Count -le $RetryPasses) { $passes += @{ Name = "retry pass $($passes.Count) of $RetryPasses"; Objects = $busy; Concurrency = 1 } }
     }
     Write-Progress -Activity 'Backfilling history' -Completed
+    foreach ($r in $failure.Values) { $result.failed.Add("$($r.Key): $($r.Error)") }
     $result.seconds = [int]$clock.Elapsed.TotalSeconds
     $result
 }
@@ -170,11 +208,14 @@ function Invoke-SynthBackfillEngine {
         [Parameter(Mandatory)][hashtable]$State,
         [Parameter(Mandatory)][string]$TimeZone,
         [Parameter(Mandatory)][int]$Concurrency,
-        [Parameter(Mandatory)][int]$MaxSamplesPerCall
+        [Parameter(Mandatory)][int]$MaxSamplesPerCall,
+        [Parameter(Mandatory)][int]$MaxRetries,
+        [Parameter(Mandatory)][int]$MaxRetryDelaySeconds
     )
     $session = $script:OpsSession
     [VcfOpsSynth.Backfill]::Run($session.BaseUri, $session.Token, [bool]$session.SkipCertificateCheck, $Batch,
-        [long]$State.range.StartMs, [int]$State.range.StepMs, [int]$State.range.Points, $TimeZone, $Concurrency, $MaxSamplesPerCall, [int][math]::Max(120, $session.TimeoutSec))
+        [long]$State.range.StartMs, [int]$State.range.StepMs, [int]$State.range.Points, $TimeZone, $Concurrency, $MaxSamplesPerCall, [int][math]::Max(120, $session.TimeoutSec),
+        $MaxRetries, $MaxRetryDelaySeconds)
 }
 
 function Read-SynthBackfillState {
