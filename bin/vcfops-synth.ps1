@@ -54,6 +54,7 @@
                                          (VCFOPS_SYNTH_KINDS)
                           -MaxVms        only the first n VMs by key, for a pilot (VCFOPS_SYNTH_MAX_VMS)
                           -Concurrency   objects posted at once (VCFOPS_SYNTH_CONCURRENCY; default 4)
+                          -MaxSamples    samples per post, halved when refused (VCFOPS_SYNTH_MAX_SAMPLES; default 100000)
                           -Restart       forget saved progress and start over on a new range (VCFOPS_SYNTH_RESTART)
                           -DryRun        count objects, series and samples; push nothing (VCFOPS_SYNTH_DRY_RUN)
 
@@ -130,6 +131,9 @@
 .PARAMETER Concurrency
     backfill: objects posted at once. VCFOPS_SYNTH_CONCURRENCY.
 
+.PARAMETER MaxSamples
+    backfill: samples per post; a post Operations refuses with HTTP 500 is halved. VCFOPS_SYNTH_MAX_SAMPLES.
+
 .PARAMETER Restart
     backfill: forget saved progress. VCFOPS_SYNTH_RESTART.
 
@@ -205,6 +209,7 @@ param(
     [string[]]$Kinds,
     [string]$MaxVms,
     [string]$Concurrency,
+    [string]$MaxSamples,
     [switch]$Restart,
 
     [string]$Fqdn,
@@ -250,6 +255,7 @@ $optionSpec = [ordered]@{
     Kinds       = @{ Env = 'VCFOPS_SYNTH_KINDS'; Type = 'list'; Commands = @('backfill') }
     MaxVms      = @{ Env = 'VCFOPS_SYNTH_MAX_VMS'; Type = 'count'; Commands = @('backfill') }
     Concurrency = @{ Env = 'VCFOPS_SYNTH_CONCURRENCY'; Type = 'count'; Commands = @('backfill') }
+    MaxSamples  = @{ Env = 'VCFOPS_SYNTH_MAX_SAMPLES'; Type = 'count'; Commands = @('backfill') }
     Restart     = @{ Env = 'VCFOPS_SYNTH_RESTART'; Type = 'switch'; Commands = @('backfill') }
     # The module reads these variables itself, so only a parameter is passed on ('module').
     Fqdn             = @{ Env = 'VCFOPS_FQDN'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill') }
@@ -588,8 +594,8 @@ try {
                     $state = Get-Content -LiteralPath $config.paths.state -Raw | ConvertFrom-Json -AsHashtable
                     if ($state -and $state.ContainsKey('backfill')) { $state.Remove('backfill'); $state | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $config.paths.state -Encoding utf8 }
                 }
-                $result = Invoke-SynthBackfill -Spec $spec -Range $range -StatePath $config.paths.state -TimeZone $config.timeZone -Concurrency $(if ($options.Concurrency) { $options.Concurrency } else { 4 }) -Verbose
-                Write-Host ('  {0} objects pushed, {1:N0} samples in {2:N0} calls, {3} s ({4:N0} samples/s); {5} already done' -f $result.objects, $result.samples, $result.calls, $result.seconds, $(if ($result.seconds) { $result.samples / $result.seconds } else { 0 }), $result.skipped)
+                $result = Invoke-SynthBackfill -Spec $spec -Range $range -StatePath $config.paths.state -TimeZone $config.timeZone -Concurrency $(if ($options.Concurrency) { $options.Concurrency } else { 4 }) -MaxSamplesPerCall $(if ($options.MaxSamples) { $options.MaxSamples } else { 100000 }) -Verbose
+                Write-Host ('  {0} objects pushed, {1:N0} samples in {2:N0} calls, {3} s ({4:N0} samples/s); {5} already done; {6} posts halved after a refusal' -f $result.objects, $result.samples, $result.calls, $result.seconds, $(if ($result.seconds) { $result.samples / $result.seconds } else { 0 }), $result.skipped, $result.splits)
                 foreach ($failure in $result.failed) { Write-Host "Failed: $failure" }
             }
             finally {

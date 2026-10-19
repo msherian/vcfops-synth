@@ -76,8 +76,9 @@ function Invoke-SynthBackfill {
         it left off over the same time range; a token rejected mid-run is renewed
         and the batch's failures retried once.
 
-        A busy Operations (seen on a lab node short of memory) answers some posts
-        with HTTP 500 for minutes at a time. Each post is retried up to MaxRetries
+        Operations 9.1.1 in the lab refused bodies of about 250,000 samples or more
+        with HTTP 500, so bodies are kept to MaxSamplesPerCall and halved when one is
+        refused. For an Operations that is busy, each post is retried up to MaxRetries
         times with waits growing to MaxRetryDelaySeconds, and objects still refused
         as busy (429 or 5xx) get up to RetryPasses more tries at the end of the run,
         one object at a time.
@@ -103,7 +104,8 @@ function Invoke-SynthBackfill {
         Objects per engine call, between state saves.
 
     .PARAMETER MaxSamplesPerCall
-        Upper bound on samples in one POST.
+        Upper bound on samples in one POST. A node that refuses a body with HTTP 500 has it
+        halved, for that object and the rest of the batch; the result's splits counts these.
 
     .PARAMETER MaxRetries
         Retries of one POST answered with 429 or 5xx before the object is given up for this pass.
@@ -127,7 +129,7 @@ function Invoke-SynthBackfill {
         [string]$TimeZone = 'Europe/Dublin',
         [ValidateRange(1, 32)][int]$Concurrency = 4,
         [ValidateRange(1, 1000)][int]$BatchSize = 20,
-        [ValidateRange(1000, 5000000)][int]$MaxSamplesPerCall = 500000,
+        [ValidateRange(1000, 5000000)][int]$MaxSamplesPerCall = 100000,
         [ValidateRange(0, 30)][int]$MaxRetries = 10,
         [ValidateRange(1, 600)][int]$MaxRetryDelaySeconds = 60,
         [ValidateRange(0, 10)][int]$RetryPasses = 2
@@ -137,7 +139,7 @@ function Invoke-SynthBackfill {
     $state = Read-SynthBackfillState -Path $StatePath -Range $Range
     $done = [System.Collections.Generic.HashSet[string]]::new([string[]]@($state.done))
     $todo = @($Spec | Where-Object { -not $done.Contains($_.Key) })
-    $result = [ordered]@{ objects = 0; samples = 0L; calls = 0; skipped = $Spec.Count - $todo.Count; failed = [System.Collections.Generic.List[string]]::new(); seconds = 0 }
+    $result = [ordered]@{ objects = 0; samples = 0L; calls = 0; skipped = $Spec.Count - $todo.Count; failed = [System.Collections.Generic.List[string]]::new(); splits = 0; seconds = 0 }
     if (-not $todo.Count) { return $result }
     if (-not $PSCmdlet.ShouldProcess("$($todo.Count) objects, $($state.range.Points) points each", 'Backfill history')) { return $result }
 
@@ -170,6 +172,7 @@ function Invoke-SynthBackfill {
             }
             foreach ($r in $outcome) {
                 $result.calls += $r.Calls
+                $result.splits += $r.Splits
                 if ($r.Status -eq 0) {
                     $result.objects++
                     $result.samples += $r.Samples

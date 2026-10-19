@@ -241,6 +241,44 @@ Describe 'Backfill engine retry delay' {
     }
 }
 
+Describe 'Backfill engine against a server that refuses large bodies' {
+    BeforeAll {
+        # A local listener that answers 500 to a body with more than 2 series and 200 otherwise, and counts the series it accepted.
+        $script:port = Get-Random -Minimum 20000 -Maximum 60000
+        $script:listener = [System.Net.HttpListener]::new(); $script:listener.Prefixes.Add("http://127.0.0.1:$script:port/"); $script:listener.Start()
+        $l = $script:listener
+        $script:server = Start-ThreadJob -ScriptBlock {
+            $l = $using:l
+            $accepted = 0; $refused = 0
+            while ($l.IsListening) {
+                try { $c = $l.GetContext() } catch { break }
+                $body = [IO.StreamReader]::new($c.Request.InputStream).ReadToEnd()
+                $n = ([regex]::Matches($body, '"statKey"')).Count
+                if ($n -gt 2) { $c.Response.StatusCode = 500; $refused++ } else { $c.Response.StatusCode = 200; $accepted += $n }
+                $c.Response.Close()
+                if ($c.Request.Url.AbsolutePath -like '*/done') { break }
+                [pscustomobject]@{ Accepted = $accepted; Refused = $refused }
+            }
+        }
+    }
+    AfterAll { $script:listener.Stop(); $script:server | Remove-Job -Force }
+
+    It 'halves refused bodies and still posts every series once' {
+        $series = @(1..8 | ForEach-Object { New-TestSeries -Key "k|$_" -Mode Constant -A 1 })
+        $objects = [VcfOpsSynth.ObjectSpec[]]@(New-TestObjectSpec -Key 'vm-1' -Series $series; New-TestObjectSpec -Key 'vm-2' -Series $series)
+        # 8 series of 12 points with at most 96 samples a body: one body of 8 series, refused, then 4, then 2.
+        $r = [VcfOpsSynth.Backfill]::Run("http://127.0.0.1:$script:port/suite-api", 't', $false, $objects, $script:start, $script:step, 12, 'UTC', 1, 96, 30, 2, 1)
+        @($r | ForEach-Object Status) -join ',' | Should -Be '0,0'
+        $r[0].Splits | Should -Be 2
+        # The second object starts at the size learned from the first.
+        $r[1].Splits | Should -Be 0
+        $r[1].Calls | Should -Be 4
+        $last = @($script:server | Receive-Job)[-1]
+        $last.Accepted | Should -Be 16
+        $last.Refused | Should -Be 2
+    }
+}
+
 Describe 'Invoke-SynthBackfill' {
     BeforeAll {
         $script:specs = [VcfOpsSynth.ObjectSpec[]]@(1..5 | ForEach-Object { New-TestObjectSpec -Key "vm-$_" -Series @(New-TestSeries -Key 'cpu|usage_average' -Mode Constant -A 1) })

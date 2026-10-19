@@ -105,6 +105,7 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-Kinds` | `VCFOPS_SYNTH_KINDS` | backfill | Comma-separated resource kinds |
 | `-MaxVms` | `VCFOPS_SYNTH_MAX_VMS` | backfill | First n VMs only, for a pilot |
 | `-Concurrency` | `VCFOPS_SYNTH_CONCURRENCY` | backfill | Objects posted at once; default 4 |
+| `-MaxSamples` | `VCFOPS_SYNTH_MAX_SAMPLES` | backfill | Samples per post, halved when refused; default 100000 |
 | `-Restart` | `VCFOPS_SYNTH_RESTART` | backfill | Forget saved progress |
 | `-Fqdn` | `VCFOPS_FQDN` | config, connect-test, plan, seed, backfill | VCF Operations host name; default `operations.fqdn` |
 | `-Username` | `VCFOPS_USERNAME` | config, connect-test, plan, seed, backfill | Account; default `operations.username` |
@@ -133,7 +134,7 @@ Objects that already exist are found by their identifiers, not their names, and 
 
 `backfill` pushes `backfillDays` of history at `intervalMinutes` for every numeric metric of the seeded objects, with analytics processing off. Metrics LiveOptics measured (VM and host CPU, memory, IOPS, throughput, latency) match its average and peak exactly. The rest follow the object's workload curve around their current value, grow to it (space in use), stay flat (capacity, counts) or stay at zero (no source). Each VM's curve comes from its workload profile in `timeZone`, with seeded noise and incident windows; hosts, clusters, datastores, port groups and folders follow the sum of their VMs' curves, so peaks line up.
 
-Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. An Operations node short of memory can refuse posts with HTTP 500 for minutes at a time, so each post is retried up to 10 times with waits growing from 2 seconds to 60, and objects still refused get two more passes at the end of the run, one at a time; any left after that are reported and picked up by the next run. In the lab, 30 days for 1,709 objects is 2.4 billion samples, about 620,000 a second at concurrency 4, and about 6 bytes a sample in the Operations database.
+Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. Operations 9.1.1 in the lab refused posts of about 250,000 samples or more with HTTP 500, so posts hold at most `-MaxSamples` samples and a refused one is halved, for the rest of the batch too. For a busy Operations, each post is retried up to 10 times with waits growing from 2 seconds to 60, and objects still refused get two more passes at the end of the run, one at a time; any left after that are reported and picked up by the next run. In the lab, 30 days for 1,709 objects is 2.4 billion samples, about 620,000 a second at concurrency 4, and about 6 bytes a sample in the Operations database.
 
 ## Development
 
