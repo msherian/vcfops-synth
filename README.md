@@ -18,9 +18,9 @@ Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history
 | `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
 | `reset` | Remove the objects seed created | to come (3) |
 | `backfill` | Push generated history for every numeric metric | 4 |
-| `content` | Groups, policies, alerts, dashboards | to come (5 to 7) |
 | `feed` | Live point every interval with analytics on, carrying on from the backfill | 6 |
 | `scenario` | Start, stop and list scenario overlays (S1 to S4, S8) | 6 |
+| `content` | Custom groups and tier policies (alerts and dashboards to come) | 5 (6 and 7 to come) |
 | `live-load` | Optional UPSA and load VMs | to come (9) |
 
 ## Quick start
@@ -160,6 +160,23 @@ pwsh ./bin/vcfops-synth.ps1 feed -ConfigPath ./config/lab.json
 pwsh ./bin/vcfops-synth.ps1 scenario -Start S1 -ConfigPath ./config/lab.json
 pwsh ./bin/vcfops-synth.ps1 scenario -Stop all -ConfigPath ./config/lab.json
 ```
+
+## Content: groups and tier policies
+
+`content` publishes, by name with the prefix (existing ones are updated in place, keeping their ids):
+
+- **Groups:** `Synth-Estate` (every seeded VM, host, cluster and datastore, matched by the synthetic tag), `Synth-Tier-1-Gold`, `-2-Silver` and `-3-Bronze` (on `vcfops-synth|tier`), one `Synth-App-<application>` per application, and `Synth-Noisy-Neighbours`.
+- **Policies:** `Synth-Base` on the estate group switches on every Synth- alert. `Synth-Tier-1-Gold`, `-2-Silver` and `-3-Bronze` inherit it, go on their tier groups, and rank above it, so a VM gets its tier's policy. Only seeded objects are in these groups; real objects keep the policies they had.
+
+The tier policies come from an SLA matrix, the part of the design that carries to other customers (which VMs land in which tier is the customer's own tier rules). `config/sla.example.json` holds the built-in values; copy it and set `content.sla` in `lab.json` to change them:
+
+| Tier | VM time remaining, warning / critical (days) | Cluster capacity buffer | Alerts switched off |
+|---|---|---|---|
+| Gold | 120 / 40 | 20% | none |
+| Silver | 90 / 30 | 10% | none |
+| Bronze | 30 / 10 | 0% | VM memory pressure |
+
+The alerts carry the tier thresholds themselves (through `vcfops-synth|tier`), so the policies only switch alerts on or off. The capacity buffer is a cluster setting, so it only applies to clusters a tier policy is assigned to; today clusters get `Synth-Base`.
 
 ## Development
 

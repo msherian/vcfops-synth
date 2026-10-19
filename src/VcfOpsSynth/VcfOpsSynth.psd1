@@ -44,6 +44,11 @@
         'Stop-SynthScenario'
         'Set-SynthFeedOverlay'
         'Invoke-SynthFeed'
+        'Get-SynthSla'
+        'Get-SynthPolicyDefinition'
+        'ConvertTo-SynthPolicyXml'
+        'ConvertTo-SynthPolicySettingsBody'
+        'Publish-SynthPolicy'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
