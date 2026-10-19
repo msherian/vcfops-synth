@@ -110,10 +110,12 @@ function Remove-SynthSeededObject {
 function Remove-SynthContent {
     <#
     .SYNOPSIS
-        Deletes the toolset's alerts, symptoms, recommendations, super metrics and custom groups, by the content prefix.
+        Deletes the toolset's policies, alerts, symptoms, recommendations, super metrics and custom groups, by the content prefix.
 
     .DESCRIPTION
-        Alerts go first, since they refer to symptoms and recommendations.
+        Policies go first, since they switch alerts on and are assigned to the
+        groups; the tier policies go before <prefix>Base, which they inherit.
+        Alerts go next, since they refer to symptoms and recommendations.
         Only items whose names (a recommendation's text) start with the prefix
         are touched. Views and dashboards cannot be listed or deleted through
         the API, so they stay; the next content run overwrites them by name.
@@ -126,6 +128,7 @@ function Remove-SynthContent {
     param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Prefix)
 
     $lists = @(
+        @{ Kind = 'policy'; Path = 'policies'; Property = 'policySummaries'; Name = { $_.name } }
         @{ Kind = 'alert'; Path = 'alertdefinitions'; Property = 'alertDefinitions'; Name = { $_.name } }
         @{ Kind = 'symptom'; Path = 'symptomdefinitions'; Property = 'symptomDefinitions'; Name = { $_.name } }
         @{ Kind = 'recommendation'; Path = 'recommendations'; Property = 'recommendations'; Name = { $_.description } }
@@ -133,7 +136,9 @@ function Remove-SynthContent {
         @{ Kind = 'custom group'; Path = 'resources/groups'; Property = 'groups'; Name = { $_.resourceKey.name } }
     )
     foreach ($list in $lists) {
-        foreach ($item in @(Get-SynthPagedList -Path $list.Path -Property $list.Property)) {
+        # The base policy last, after the policies that inherit it.
+        $items = @(Get-SynthPagedList -Path $list.Path -Property $list.Property | Sort-Object { [string](ForEach-Object -InputObject $_ -Process $list.Name) -eq "${Prefix}Base" })
+        foreach ($item in $items) {
             $name = [string](ForEach-Object -InputObject $item -Process $list.Name)
             if (-not $name.StartsWith($Prefix, [StringComparison]::Ordinal)) { continue }
             $id = [string]$item.id

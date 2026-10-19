@@ -18,7 +18,7 @@ Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history
 | `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
 | `reset` | Remove the objects seed created (and, with `-IncludeContent`, the toolset's content) | 8 |
 | `backfill` | Push generated history for every numeric metric | 4 |
-| `content` | Custom groups, symptoms, alerts and super metrics; policies and dashboards to come | 5 and 6 (7 to come) |
+| `content` | Custom groups, tier policies, symptoms, alerts and super metrics; dashboards to come | 5 and 6 (7 to come) |
 | `feed` | Live point every interval with analytics on, carrying on from the backfill | 6 |
 | `scenario` | Start, stop and list scenario overlays (S1 to S4, S8) | 6 |
 | `live-load` | Optional UPSA and load VMs | to come (9) |
@@ -163,7 +163,26 @@ pwsh ./bin/vcfops-synth.ps1 scenario -Start S1 -ConfigPath ./config/lab.json
 pwsh ./bin/vcfops-synth.ps1 scenario -Stop all -ConfigPath ./config/lab.json
 ```
 
-`content` publishes the symptoms, alerts and super metrics that make the scenarios show up in Operations, by name with the content prefix; existing ones are updated in place and anything outside the prefix is never touched. Thresholds follow the tiers, read from the `vcfops-synth|tier` property seed writes, so one set of alerts covers every tier:
+## Content: groups and tier policies
+
+`content` publishes, by name with the prefix (existing ones are updated in place, keeping their ids):
+
+- **Groups:** `Synth-Estate` (every seeded VM, host, cluster and datastore, matched by the synthetic tag), `Synth-Tier-1-Gold`, `-2-Silver` and `-3-Bronze` (on `vcfops-synth|tier`), one `Synth-App-<application>` per application, and `Synth-Noisy-Neighbours`.
+- **Policies:** `Synth-Base` on the estate group switches on every Synth- alert. `Synth-Tier-1-Gold`, `-2-Silver` and `-3-Bronze` inherit it, go on their tier groups, and rank above it, so a VM gets its tier's policy. Only seeded objects are in these groups; real objects keep the policies they had.
+
+The tier policies come from an SLA matrix, the part of the design that carries to other customers (which VMs land in which tier is the customer's own tier rules). `config/sla.example.json` holds the built-in values; copy it and set `content.sla` in `lab.json` to change them:
+
+| Tier | VM time remaining, warning / critical (days) | Cluster capacity buffer | Alerts switched off |
+|---|---|---|---|
+| Gold | 120 / 40 | 20% | none |
+| Silver | 90 / 30 | 10% | none |
+| Bronze | 30 / 10 | 0% | VM memory pressure |
+
+The alerts carry the tier thresholds themselves (through `vcfops-synth|tier`), so the policies only switch alerts on or off. The capacity buffer is a cluster setting, so it only applies to clusters a tier policy is assigned to; today clusters get `Synth-Base`.
+
+### Symptoms, alerts and super metrics
+
+`content` also publishes the symptoms, alerts and super metrics that make the scenarios show up in Operations, by name with the content prefix; existing ones are updated in place and anything outside the prefix is never touched. Thresholds follow the tiers, read from the `vcfops-synth|tier` property seed writes, so one set of alerts covers every tier:
 
 | Alert | Raised by | Warning | Critical |
 |---|---|---|---|
@@ -183,7 +202,7 @@ Each alert has a recommendation. The super metrics are VM CPU demand over alloca
 
 `reset` removes what seed created. It finds each planned object by kind and unique identifier, as seed does, never by name, and deletes it only when its `summary|tag` carries the synthetic tag (`seed.tag`, `vcfops-synth-synthetic` by default); an object with a matching identifier but no tag is listed by ID and left alone. VMs go first and the Physical Datacenter last. Afterwards it forgets the backfill progress, the feed's last push and the running scenarios, so a reseed starts clean.
 
-Without `-Force` it only reports what it would delete. `-IncludeContent` also deletes the alerts, symptoms, recommendations, super metrics and custom groups whose names start with the content prefix. Views and dashboards cannot be deleted through the API, so delete those in the UI or let the next `content` run overwrite them.
+Without `-Force` it only reports what it would delete. `-IncludeContent` also deletes the policies (the tier policies before `Synth-Base`), alerts, symptoms, recommendations, super metrics and custom groups whose names start with the content prefix, `Synth-Estate` included. Views and dashboards cannot be deleted through the API, so delete those in the UI or let the next `content` run overwrite them.
 
 ```bash
 pwsh ./bin/vcfops-synth.ps1 reset -ConfigPath ./config/lab.json                    # report only

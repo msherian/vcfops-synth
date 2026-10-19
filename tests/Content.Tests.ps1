@@ -10,18 +10,24 @@ BeforeAll {
 }
 
 Describe 'Get-SynthGroupDefinition' {
-    It 'makes one group per tier, one per application and the scenario target group, all with the prefix' {
+    It 'makes the estate group, one per tier, one per application and the scenario target group, all with the prefix' {
         $defs = @(Get-SynthGroupDefinition -Inventory $script:inventory -Prefix 'Synth-')
-        ($defs | ForEach-Object Name) -join ',' | Should -Be 'Synth-Tier-1-Gold,Synth-Tier-2-Silver,Synth-Tier-3-Bronze,Synth-App-Payments,Synth-App-Web Shop,Synth-Noisy-Neighbours'
-        $gold = $defs[0]
-        "$($gold.Type)|$($gold.Tier)|$($gold.Rule.Key)|$($gold.Rule.Value)" | Should -Be 'Service Level Objective|Gold|vcfops-synth|tier|Gold'
-        "$($defs[3].Type)|$($defs[3].Rule.Key)|$($defs[3].Rule.Value)" | Should -Be 'Function|vcfops-synth|application|Payments'
+        ($defs | ForEach-Object Name) -join ',' | Should -Be 'Synth-Estate,Synth-Tier-1-Gold,Synth-Tier-2-Silver,Synth-Tier-3-Bronze,Synth-App-Payments,Synth-App-Web Shop,Synth-Noisy-Neighbours'
+        $gold = $defs[1]
+        "$($gold.Type)|$($gold.Tier)|$($gold.Policy)|$($gold.Rules[0].Key)|$($gold.Rules[0].Value)" | Should -Be 'Service Level Objective|Gold|Gold|vcfops-synth|tier|Gold'
+        "$($defs[4].Type)|$($defs[4].Policy)|$($defs[4].Rules[0].Key)|$($defs[4].Rules[0].Value)" | Should -Be 'Function||vcfops-synth|application|Payments'
+    }
+
+    It 'matches the estate on the synthetic tag, on VMs, hosts, clusters and datastores, and gives it the base policy' {
+        $estate = @(Get-SynthGroupDefinition -Inventory $script:inventory -Tag @{ category = 'cat'; name = 'mark' })[0]
+        $estate.Policy | Should -Be 'Base'
+        ($estate.Rules | ForEach-Object { "$($_.Kind):$($_.TagCategory)=$($_.TagValue)" }) -join ',' | Should -Be 'VirtualMachine:cat=mark,HostSystem:cat=mark,ClusterComputeResource:cat=mark,Datastore:cat=mark'
     }
 }
 
 Describe 'ConvertTo-SynthGroupBody' {
     It 'writes a dynamic property rule on VMWARE VMs, with the policy when given' {
-        $d = @(Get-SynthGroupDefinition -Inventory $script:inventory)[0]
+        $d = @(Get-SynthGroupDefinition -Inventory $script:inventory)[1]
         $body = ConvertTo-SynthGroupBody -Definition $d -PolicyId 'pol-1' -Id 'grp-1'
         $json = $body | ConvertTo-Json -Depth 10 | ConvertFrom-Json
         $json.resourceKey.adapterKindKey | Should -Be 'Container'
@@ -32,6 +38,15 @@ Describe 'ConvertTo-SynthGroupBody' {
         "$($rule.propertyConditionRules[0].key) $($rule.propertyConditionRules[0].compareOperator) $($rule.propertyConditionRules[0].stringValue)" | Should -Be 'vcfops-synth|tier EQ Gold'
         "$($json.policy) $($json.id)" | Should -Be 'pol-1 grp-1'
         (ConvertTo-SynthGroupBody -Definition $d).Contains('policy') | Should -BeFalse
+    }
+
+    It 'writes one tag rule per kind for the estate group' {
+        $d = @(Get-SynthGroupDefinition -Inventory $script:inventory)[0]
+        $json = ConvertTo-SynthGroupBody -Definition $d | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+        $json.membershipDefinition.rules.Count | Should -Be 4
+        $tag = $json.membershipDefinition.rules[1]
+        "$($tag.resourceKindKey.resourceKind) $($tag.resourceTagConditionRules[0].category) $($tag.resourceTagConditionRules[0].compareOperator) $($tag.resourceTagConditionRules[0].stringValue)" | Should -Be 'HostSystem vcfops-synth EQ synthetic'
+        $tag.PSObject.Properties['propertyConditionRules'] | Should -BeNullOrEmpty
     }
 }
 
