@@ -82,15 +82,17 @@
         -AnonymisationKey key for stable IDs and pseudonyms, for runs that keep no state
                           (VCFOPS_SYNTH_ANON_KEY; default <paths.data>/anonymise.key)
 
-        content           Publishes the toolset's custom groups (one per tier, one per application from the
-                          tier rules, and the scenario targets), by name with the prefix; existing ones are updated.
-                          Membership follows the vcfops-synth|tier and |application properties seed writes.
-                          Then the symptoms, alerts (with tier thresholds), recommendations and super metrics
-                          the scenarios raise. Then the list views and reports (VM tier list, oversized and
+        content           Publishes the toolset's custom groups (the synthetic estate, one per tier, one per
+                          application from the tier rules, and the scenario targets), by name with the prefix;
+                          existing ones are updated. Membership follows the synthetic tag and the vcfops-synth|tier
+                          and |application properties seed writes. Then the symptoms, alerts (with tier thresholds),
+                          recommendations and super metrics the scenarios raise, then the policies (Synth-Base
+                          on the estate switches on every Synth- alert, a tier policy on each tier group, from the
+                          SLA matrix in content.sla). Last the list views and reports (VM tier list, oversized and
                           undersized VMs, configuration hygiene, cluster tier pressure; weekly tier compliance and
                           rightsizing reports), written to <paths.data>/content-bundle.zip and imported with force,
                           so a re-run overwrites them by name. Exit code 1 when any item is rejected; the rest are
-                          still published. Tiered policies follow (Phase 5); dashboards later in Phase 7.
+                          still published. Dashboards later in Phase 7.
                           -DryRun        list what would be created or updated, and write the bundle without
                                          importing it (VCFOPS_SYNTH_DRY_RUN)
                           -ImportField   multipart field the bundle is sent in (VCFOPS_SYNTH_IMPORT_FIELD;
@@ -118,8 +120,9 @@
                           deleted only when they carry the synthetic tag (seed.tag); then forgets the backfill,
                           feed and scenario state. Reports only, unless -Force is given.
                           -Force          delete for real (VCFOPS_SYNTH_FORCE)
-                          -IncludeContent also delete the prefixed alerts, symptoms, recommendations, super metrics
-                                          and custom groups; views and dashboards stay (VCFOPS_SYNTH_INCLUDE_CONTENT)
+                          -IncludeContent also delete the prefixed policies, alerts, symptoms, recommendations,
+                                          super metrics and custom groups; views and dashboards stay
+                                          (VCFOPS_SYNTH_INCLUDE_CONTENT)
                           -DryRun         report only, even with -Force (VCFOPS_SYNTH_DRY_RUN)
                           -Adapter        vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
 
@@ -160,7 +163,7 @@
     reset: delete for real; without it reset only reports. VCFOPS_SYNTH_FORCE.
 
 .PARAMETER IncludeContent
-    reset: also delete the prefixed alerts, symptoms, recommendations, super metrics and custom groups.
+    reset: also delete the prefixed policies, alerts, symptoms, recommendations, super metrics and custom groups.
     VCFOPS_SYNTH_INCLUDE_CONTENT.
 
 .PARAMETER ImportField
@@ -597,9 +600,10 @@ try {
         'content' {
             $config = Get-CliConfig
             $inventory = Get-SynthInventory -Path $config.paths.inventory
-            $groups = @(Get-SynthGroupDefinition -Inventory $inventory -Prefix $config.prefix)
+            $groups = @(Get-SynthGroupDefinition -Inventory $inventory -Prefix $config.prefix -Tag $config.seed.tag)
+            $sla = Get-SynthSla -Path $config.content.sla
             $alertContent = Get-SynthAlertContent -Prefix $config.prefix
-            Write-Host ("Content for {0}: {1} custom groups, {2} symptoms, {3} recommendations, {4} alerts, {5} super metrics" -f $config.operations.fqdn, $groups.Count,
+            Write-Host ("Content for {0}: {1} custom groups, {2} symptoms, {3} recommendations, {4} alerts, {5} super metrics, 4 policies" -f $config.operations.fqdn, $groups.Count,
                 $alertContent.Symptoms.Count, $alertContent.Recommendations.Count, $alertContent.Alerts.Count, $alertContent.SuperMetrics.Count)
             $null = Connect-Cli -Config $config
             $failed = 0
@@ -611,6 +615,18 @@ try {
                     Write-Host ('  {0,-14} {1,-14} {2}' -f $r.Action, $r.Kind, $r.Name)
                     if ($r.Error) { $failed++; Write-Host "    $($r.Error)" }
                     if ($r.Kind -eq 'super metric' -and $r.Id) { $superMetricId[$r.Name] = $r.Id }
+                }
+                # Policies after the alerts, so Synth-Base switches on the alerts this run created.
+                $alerts = @((Invoke-SynthOpsRequest -Method Get -Path 'alertdefinitions' -Query @{ pageSize = 5000 }).alertDefinitions)
+                $policies = @(Get-SynthPolicyDefinition -Sla $sla -AlertDefinition $alerts -Prefix $config.prefix)
+                $groupIdByKey = @{}
+                foreach ($g in $groups) {
+                    $id = @($results | Where-Object Name -eq $g.Name)[0].Id
+                    if ($g.Policy -and $id) { $groupIdByKey[$g.Policy] = @($id) }
+                }
+                Write-Host "Policies: Synth- alerts switched on in the base: $(@($policies[0].Alerts).Count)"
+                foreach ($r in @(Publish-SynthPolicy -Definition $policies -GroupIdByKey $groupIdByKey -Prefix $config.prefix -WhatIf:([bool]$options.DryRun))) {
+                    Write-Host ('  {0,-14} {1} (groups: {2})' -f $r.Action, $r.Name, $r.Groups)
                 }
 
                 # Views and reports go in through a content bundle; a view refers to a super metric by id.

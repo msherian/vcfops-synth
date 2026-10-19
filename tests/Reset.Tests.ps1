@@ -76,6 +76,7 @@ Describe 'Remove-SynthContent' {
             if ($Method -ne 'Get') { return }
             $item = { param($id, $name) [pscustomobject]@{ id = $id; name = $name } }
             switch ($Path) {
+                'policies' { [pscustomobject]@{ policySummaries = @((& $item 'p0' 'Synth-Base'), (& $item 'p1' 'Synth-Tier-1-Gold'), (& $item 'p2' 'Default Policy')) } }
                 'alertdefinitions' { [pscustomobject]@{ alertDefinitions = @((& $item 'a1' 'Synth-Host not responding'), (& $item 'a2' 'Host down')) } }
                 'symptomdefinitions' { [pscustomobject]@{ symptomDefinitions = @(& $item 's1' 'Synth-Host not responding') } }
                 'recommendations' { [pscustomobject]@{ recommendations = @([pscustomobject]@{ id = 'rc1'; description = 'Synth-Check the host.' }, [pscustomobject]@{ id = 'rc2'; description = 'Check the host.' }) } }
@@ -85,10 +86,10 @@ Describe 'Remove-SynthContent' {
         }
     }
 
-    It 'deletes prefixed items only, alerts before the symptoms they use' {
+    It 'deletes prefixed items only: tier policies, then the base policy, then alerts before the symptoms they use' {
         $out = @(Remove-SynthContent -Prefix 'Synth-' -Confirm:$false)
-        (@($script:calls | Where-Object Method -eq 'Delete') | ForEach-Object Path) -join ',' | Should -Be 'alertdefinitions/a1,symptomdefinitions/s1,recommendations/rc1,resources/groups/g1'
-        @($out | Where-Object Action -eq 'deleted').Count | Should -Be 4
+        (@($script:calls | Where-Object Method -eq 'Delete') | ForEach-Object Path) -join ',' | Should -Be 'policies/p1,policies/p0,alertdefinitions/a1,symptomdefinitions/s1,recommendations/rc1,resources/groups/g1'
+        @($out | Where-Object Action -eq 'deleted').Count | Should -Be 6
     }
 
     It 'deletes nothing with -WhatIf, and refuses an empty prefix' {

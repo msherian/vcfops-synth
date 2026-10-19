@@ -59,6 +59,11 @@
         'New-SynthContentBundle'
         'Get-SynthOpsUserId'
         'Import-SynthContentBundle'
+        'Get-SynthSla'
+        'Get-SynthPolicyDefinition'
+        'ConvertTo-SynthPolicyXml'
+        'ConvertTo-SynthPolicySettingsBody'
+        'Publish-SynthPolicy'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
