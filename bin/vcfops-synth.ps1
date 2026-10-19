@@ -82,10 +82,11 @@
         -AnonymisationKey key for stable IDs and pseudonyms, for runs that keep no state
                           (VCFOPS_SYNTH_ANON_KEY; default <paths.data>/anonymise.key)
 
-        content           Publishes the toolset's custom groups (one per tier, one per application from the
-                          tier rules, and the scenario targets), by name with the prefix; existing ones are updated.
-                          Membership follows the vcfops-synth|tier and |application properties seed writes.
-                          Tiered policies follow (Phase 5); alerts and dashboards in Phases 6 and 7.
+        content           Publishes the toolset's custom groups (the synthetic estate, one per tier, one per
+                          application from the tier rules, and the scenario targets) and its policies (Synth-Base
+                          on the estate, a tier policy on each tier group, from the SLA matrix in content.sla),
+                          by name with the prefix; existing ones are updated. Membership follows the synthetic
+                          tag and the vcfops-synth|tier and |application properties seed writes.
                           -DryRun        list what would be created or updated (VCFOPS_SYNTH_DRY_RUN)
 
     Commands still to come, by build phase:
@@ -509,12 +510,24 @@ try {
         'content' {
             $config = Get-CliConfig
             $inventory = Get-SynthInventory -Path $config.paths.inventory
-            $groups = @(Get-SynthGroupDefinition -Inventory $inventory -Prefix $config.prefix)
-            Write-Host "Content for $($config.operations.fqdn): $($groups.Count) custom groups"
+            $groups = @(Get-SynthGroupDefinition -Inventory $inventory -Prefix $config.prefix -Tag $config.seed.tag)
+            $sla = Get-SynthSla -Path $config.content.sla
+            Write-Host "Content for $($config.operations.fqdn): $($groups.Count) custom groups, 4 policies"
             $null = Connect-Cli -Config $config
             try {
                 $results = @(Publish-SynthGroup -Definition $groups -Prefix $config.prefix -WhatIf:([bool]$options.DryRun))
                 foreach ($r in $results) { Write-Host ('  {0,-14} {1}' -f $r.Action, $r.Name) }
+                $alerts = @((Invoke-SynthOpsRequest -Method Get -Path 'alertdefinitions' -Query @{ pageSize = 5000 }).alertDefinitions)
+                $policies = @(Get-SynthPolicyDefinition -Sla $sla -AlertDefinition $alerts -Prefix $config.prefix)
+                $groupIdByKey = @{}
+                foreach ($g in $groups) {
+                    $id = @($results | Where-Object Name -eq $g.Name)[0].Id
+                    if ($g.Policy -and $id) { $groupIdByKey[$g.Policy] = @($id) }
+                }
+                Write-Host "Policies: Synth- alerts switched on in the base: $(@($policies[0].Alerts).Count)"
+                foreach ($r in @(Publish-SynthPolicy -Definition $policies -GroupIdByKey $groupIdByKey -Prefix $config.prefix -WhatIf:([bool]$options.DryRun))) {
+                    Write-Host ('  {0,-14} {1} (groups: {2})' -f $r.Action, $r.Name, $r.Groups)
+                }
                 if ($options.DryRun) { Write-Host 'Dry run: nothing was changed.' }
             }
             finally {

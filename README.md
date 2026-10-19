@@ -18,7 +18,7 @@ Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history
 | `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
 | `reset` | Remove the objects seed created | to come (3) |
 | `backfill` | Push generated history for every numeric metric | 4 |
-| `content` | Groups, policies, alerts, dashboards | to come (5 to 7) |
+| `content` | Custom groups and tier policies (alerts and dashboards to come) | 5 (6 and 7 to come) |
 | `feed`, `scenario` | Live metrics and scenario overlays | to come (6) |
 | `live-load` | Optional UPSA and load VMs | to come (9) |
 
@@ -135,6 +135,22 @@ Objects that already exist are found by their identifiers, not their names, and 
 
 Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. In the lab, 30 days for 1,709 objects is 2.4 billion samples, about 620,000 a second at concurrency 4, and about 6 bytes a sample in the Operations database.
 
+## Content: groups and tier policies
+
+`content` publishes, by name with the prefix (existing ones are updated in place, keeping their ids):
+
+- **Groups:** `Synth-Estate` (every seeded VM, host, cluster and datastore, matched by the synthetic tag), `Synth-Tier-1-Gold`, `-2-Silver` and `-3-Bronze` (on `vcfops-synth|tier`), one `Synth-App-<application>` per application, and `Synth-Noisy-Neighbours`.
+- **Policies:** `Synth-Base` on the estate group switches on every Synth- alert. `Synth-Tier-1-Gold`, `-2-Silver` and `-3-Bronze` inherit it, go on their tier groups, and rank above it, so a VM gets its tier's policy. Only seeded objects are in these groups; real objects keep the policies they had.
+
+The tier policies come from an SLA matrix, the part of the design that carries to other customers (which VMs land in which tier is the customer's own tier rules). `config/sla.example.json` holds the built-in values; copy it and set `content.sla` in `lab.json` to change them:
+
+| Tier | VM time remaining, warning / critical (days) | Cluster capacity buffer | Alerts switched off |
+|---|---|---|---|
+| Gold | 120 / 40 | 20% | none |
+| Silver | 90 / 30 | 10% | none |
+| Bronze | 30 / 10 | 0% | VM memory pressure |
+
+The alerts carry the tier thresholds themselves (through `vcfops-synth|tier`), so the policies only switch alerts on or off. The capacity buffer is a cluster setting, so it only applies to clusters a tier policy is assigned to; today clusters get `Synth-Base`.
 ## Development
 
 PowerShell 7.4 or later, Pester 5 and PSScriptAnalyzer. Tests need no lab.
