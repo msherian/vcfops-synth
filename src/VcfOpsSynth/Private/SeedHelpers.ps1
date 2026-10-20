@@ -738,7 +738,7 @@ function New-SynthHolderAdapter {
         Creates a VMWARE adapter instance that only holds the synthetic estate, and never starts it.
 
     .DESCRIPTION
-        The instance gets a vCenter address that cannot resolve (synth.invalid), a VMEntityVCID of its
+        The instance gets a vCenter address that cannot resolve (<vcid>.synth.invalid), a VMEntityVCID of its
         own, autodiscovery off and a placeholder credential, so it never reaches a vCenter. Starting it
         would make it reconcile against that address and mark every seeded object not existing; the name
         and description say so. A credential of the same name left by an earlier, deleted instance (Operations
@@ -755,13 +755,15 @@ function New-SynthHolderAdapter {
             $null = Invoke-SynthOpsRequest -Method Delete -Path "credentials/$($old.id)"
         }
     }
+    # The address names the instance too, so a second holder needs an address of its own.
+    $vcId = [guid]::NewGuid().ToString()
     $body = @{
         name                = $Name
         description         = 'vcfops-synth: holds the synthetic estate only. Do not start it: it would mark every object under it not existing.'
         adapterKindKey      = 'VMWARE'
         resourceIdentifiers = @(
-            @{ name = 'VCURL'; value = 'synth.invalid' }
-            @{ name = 'VMEntityVCID'; value = [guid]::NewGuid().ToString() }
+            @{ name = 'VCURL'; value = "$vcId.synth.invalid" }
+            @{ name = 'VMEntityVCID'; value = $vcId }
             @{ name = 'AUTODISCOVERY'; value = 'false' }
             @{ name = 'PROCESSCHANGEEVENTS'; value = 'false' }
         )

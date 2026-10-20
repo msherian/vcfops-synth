@@ -655,7 +655,7 @@ Describe 'Resolve-SynthSeedTarget' {
         $target.AdapterInstanceId | Should -Be 'holder-1'
         $body = @($script:calls | Where-Object { $_.Method -eq 'Post' -and $_.Path -eq 'adapters' })[0].Body
         $ids = @{}; foreach ($i in $body.resourceIdentifiers) { $ids[$i.name] = $i.value }
-        $ids.VCURL | Should -Be 'synth.invalid'
+        $ids.VCURL | Should -Be "$($ids.VMEntityVCID).synth.invalid"
         $ids.AUTODISCOVERY | Should -Be 'false'
         $ids.VMEntityVCID | Should -Not -Be 'vc-uuid-real'
         $target.VcId | Should -Be $ids.VMEntityVCID
