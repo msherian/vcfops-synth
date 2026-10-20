@@ -38,8 +38,8 @@ function Get-SynthAlertContent {
         & $metric $vm 'VM CPU ready above 5 %' 'cpu|readyPct' 'GT' 5 'CRITICAL'
         & $metric $vm 'VM CPU ready above 10 %' 'cpu|readyPct' 'GT' 10 'CRITICAL'
         foreach ($ms in 10, 20, 40, 50) {
-            & $metric $vm "VM disk read latency above $ms ms" 'virtualDisk|totalReadLatency_average' 'GT' $ms $(if ($ms -eq 10) { 'WARNING' } else { 'CRITICAL' })
-            & $metric $vm "VM disk write latency above $ms ms" 'virtualDisk|totalWriteLatency_average' 'GT' $ms $(if ($ms -eq 10) { 'WARNING' } else { 'CRITICAL' })
+            & $metric $vm "VM disk read latency above $ms ms" 'virtualDisk:Aggregate of all instances|totalReadLatency_average' 'GT' $ms $(if ($ms -eq 10) { 'WARNING' } else { 'CRITICAL' })
+            & $metric $vm "VM disk write latency above $ms ms" 'virtualDisk:Aggregate of all instances|totalWriteLatency_average' 'GT' $ms $(if ($ms -eq 10) { 'WARNING' } else { 'CRITICAL' })
         }
         & $metric $vm 'VM memory ballooning above 10 %' 'mem|balloonPct' 'GT' 10 'WARNING'
         & $metric $vm 'VM swapping in' 'mem|swapinRate_average' 'GT' 1024 'CRITICAL'
@@ -96,7 +96,7 @@ function Get-SynthAlertContent {
         @{ Name = "${Prefix}Cluster worst VM CPU ready"; ResourceKinds = @(@{ AdapterKind = 'VMWARE'; ResourceKind = 'ClusterComputeResource' }); UnitId = 'percent'; Description = 'The highest CPU ready time of any VM in the cluster.'
             Formula = 'max(${adaptertype=VMWARE, objecttype=VirtualMachine, metric=cpu|readyPct, depth=2})' }
         @{ Name = "${Prefix}Cluster worst VM disk latency"; ResourceKinds = @(@{ AdapterKind = 'VMWARE'; ResourceKind = 'ClusterComputeResource' }); UnitId = 'ms'; Description = 'The highest disk read latency of any VM in the cluster.'
-            Formula = 'max(${adaptertype=VMWARE, objecttype=VirtualMachine, metric=virtualDisk|totalReadLatency_average, depth=2})' }
+            Formula = 'max(${adaptertype=VMWARE, objecttype=VirtualMachine, metric=virtualDisk:Aggregate of all instances|totalReadLatency_average, depth=2})' }
         @{ Name = "${Prefix}Tier VM health"; ResourceKinds = @(@{ AdapterKind = 'Container'; ResourceKind = 'Service Level Objective' }); UnitId = ''; Description = 'The average health of the VMs in a tier group.'
             Formula = 'avg(${adaptertype=VMWARE, objecttype=VirtualMachine, metric=badge|health, depth=1})' }
     )
