@@ -603,12 +603,12 @@ try {
 
             $null = Connect-Cli -Config $config
             try {
-                $target = Resolve-SynthSeedTarget -Name $adapterName
-                $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target
+                $seedTarget = Resolve-SynthSeedTarget -Name $adapterName
+                $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $seedTarget
                 $plan = $built.Plan
                 Write-Host "Tags: $(($built.Tags | ForEach-Object { "$($_.Category): $($_.Name)" }) -join '; ')"
                 $objects = @($plan.objects)
-                Write-Host "Seed plan for adapter instance $adapterName ($($target.AdapterInstanceId)), vCenter $($target.VcId):"
+                Write-Host "Seed plan for adapter instance $adapterName ($($seedTarget.AdapterInstanceId)), vCenter $($seedTarget.VcId):"
                 $objects | Group-Object { $_.kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count)" }
                 $edges = ($plan.links | ForEach-Object { @($_.children).Count } | Measure-Object -Sum).Sum
                 Write-Host "  $($objects.Count) objects, $edges links"
@@ -619,7 +619,7 @@ try {
                     exit 0
                 }
 
-                $result = Invoke-SynthSeed -Plan $plan -AdapterInstanceId $target.AdapterInstanceId -Refresh:$options.Refresh
+                $result = Invoke-SynthSeed -Plan $plan -AdapterInstanceId $seedTarget.AdapterInstanceId -Refresh:$options.Refresh
                 foreach ($kind in $result.created.Keys) {
                     Write-Host "  $($kind): $($result.created[$kind]) created, $($result.existing[$kind]) already there"
                 }
@@ -647,8 +647,8 @@ try {
 
             $null = Connect-Cli -Config $config
             try {
-                $target = Resolve-SynthSeedTarget -Name $adapterName
-                $plan = (New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target).Plan
+                $seedTarget = Resolve-SynthSeedTarget -Name $adapterName
+                $plan = (New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $seedTarget).Plan
                 if ($options.Kinds) {
                     $unknown = @($options.Kinds | Where-Object { $_ -notin @($plan.objects | ForEach-Object { $_.kind }) })
                     if ($unknown.Count) { Write-Host "No planned objects of kind $($unknown -join ', '). Run 'help' for usage."; exit 2 }
@@ -658,7 +658,7 @@ try {
                     $keep = @($plan.objects | Where-Object { $_.kind -eq 'VirtualMachine' } | Sort-Object { $_.key } | Select-Object -First $options.MaxVms | ForEach-Object { $_.key })
                     $plan.objects = @($plan.objects | Where-Object { $_.kind -ne 'VirtualMachine' -or $_.key -in $keep })
                 }
-                $ids = Resolve-SynthPlanId -Plan $plan -AdapterInstanceId $target.AdapterInstanceId
+                $ids = Resolve-SynthPlanId -Plan $plan -AdapterInstanceId $seedTarget.AdapterInstanceId
                 $missing = @($plan.objects | Where-Object { -not $ids.ContainsKey($_.key) }).Count
                 $spec = @(New-SynthBackfillSpec -Plan $plan -Inventory $inventory -Ids $ids)
                 $series = ($spec | ForEach-Object { $_.Series.Count } | Measure-Object -Sum).Sum
