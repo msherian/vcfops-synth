@@ -37,10 +37,14 @@ function Get-SynthAlertContent {
         & $metric $vm 'VM CPU ready above 3 %' 'cpu|readyPct' 'GT' 3 'WARNING'
         & $metric $vm 'VM CPU ready above 5 %' 'cpu|readyPct' 'GT' 5 'CRITICAL'
         & $metric $vm 'VM CPU ready above 10 %' 'cpu|readyPct' 'GT' 10 'CRITICAL'
+        # A symptom's severity is its own, so a threshold that is one tier's critical and another's warning needs one of each.
+        & $metric $vm 'VM CPU ready above 5 % (warning)' 'cpu|readyPct' 'GT' 5 'WARNING'
         foreach ($ms in 10, 20, 40, 50) {
             & $metric $vm "VM disk read latency above $ms ms" 'virtualDisk:Aggregate of all instances|totalReadLatency_average' 'GT' $ms $(if ($ms -eq 10) { 'WARNING' } else { 'CRITICAL' })
             & $metric $vm "VM disk write latency above $ms ms" 'virtualDisk:Aggregate of all instances|totalWriteLatency_average' 'GT' $ms $(if ($ms -eq 10) { 'WARNING' } else { 'CRITICAL' })
         }
+        & $metric $vm 'VM disk read latency above 20 ms (warning)' 'virtualDisk:Aggregate of all instances|totalReadLatency_average' 'GT' 20 'WARNING'
+        & $metric $vm 'VM disk write latency above 20 ms (warning)' 'virtualDisk:Aggregate of all instances|totalWriteLatency_average' 'GT' 20 'WARNING'
         & $metric $vm 'VM memory ballooning above 10 %' 'mem|balloonPct' 'GT' 10 'WARNING'
         & $metric $vm 'VM swapping in' 'mem|swapinRate_average' 'GT' 1024 'CRITICAL'
         & $metric $vm 'VM guest file system above 90 %' 'guestfilesystem|percentage_total' 'GT' 90 'WARNING'
@@ -62,23 +66,25 @@ function Get-SynthAlertContent {
     )
 
     # A state: severity, the symptoms that must all hold (each item a name, or an array of names any of which holds).
+    # Operations keeps one state per alert definition, so a warning and a critical level are one AUTO state: the alert
+    # takes the highest severity of the symptoms that hold.
     $state = { param($severity, [object[]]$all, $rec) @{ Severity = $severity; All = $all; Recommendation = $rec } }
-    $latency = { param($ms) , @("${Prefix}VM disk read latency above $ms ms", "${Prefix}VM disk write latency above $ms ms") }
+    $latency = { param($ms, $suffix = '') @("${Prefix}VM disk read latency above $ms ms$suffix", "${Prefix}VM disk write latency above $ms ms$suffix") }
     $alerts = @(
         $vm + @{ Name = "${Prefix}Gold VM CPU contention"; Type = 15; SubType = 19; Description = 'A Gold VM waits for CPU (ready time above its tier threshold), usually because neighbours on its host are busy.'
-            States = @((& $state 'CRITICAL' @("${Prefix}VM tier is Gold", "${Prefix}VM CPU ready above 5 %") 'cpu'), (& $state 'WARNING' @("${Prefix}VM tier is Gold", "${Prefix}VM CPU ready above 3 %") 'cpu')) }
+            States = @(& $state 'AUTO' @("${Prefix}VM tier is Gold", @("${Prefix}VM CPU ready above 5 %", "${Prefix}VM CPU ready above 3 %")) 'cpu') }
         $vm + @{ Name = "${Prefix}Silver VM CPU contention"; Type = 15; SubType = 19; Description = 'A Silver VM waits for CPU (ready time above its tier threshold).'
-            States = @((& $state 'CRITICAL' @("${Prefix}VM tier is Silver", "${Prefix}VM CPU ready above 10 %") 'cpu'), (& $state 'WARNING' @("${Prefix}VM tier is Silver", "${Prefix}VM CPU ready above 5 %") 'cpu')) }
+            States = @(& $state 'AUTO' @("${Prefix}VM tier is Silver", @("${Prefix}VM CPU ready above 10 %", "${Prefix}VM CPU ready above 5 % (warning)")) 'cpu') }
         $vm + @{ Name = "${Prefix}Gold VM disk latency"; Type = 15; SubType = 19; Description = "A Gold VM's disk latency is above its tier threshold."
-            States = @((& $state 'CRITICAL' @("${Prefix}VM tier is Gold", (& $latency 20)) 'latency'), (& $state 'WARNING' @("${Prefix}VM tier is Gold", (& $latency 10)) 'latency')) }
+            States = @(& $state 'AUTO' @("${Prefix}VM tier is Gold", @((& $latency 20) + (& $latency 10))) 'latency') }
         $vm + @{ Name = "${Prefix}Silver VM disk latency"; Type = 15; SubType = 19; Description = "A Silver VM's disk latency is above its tier threshold."
-            States = @((& $state 'CRITICAL' @("${Prefix}VM tier is Silver", (& $latency 40)) 'latency'), (& $state 'WARNING' @("${Prefix}VM tier is Silver", (& $latency 20)) 'latency')) }
+            States = @(& $state 'AUTO' @("${Prefix}VM tier is Silver", @((& $latency 40) + (& $latency 20 ' (warning)'))) 'latency') }
         $vm + @{ Name = "${Prefix}Bronze VM disk latency"; Type = 15; SubType = 19; Description = "A Bronze VM's disk latency is above 50 ms."
-            States = @((& $state 'CRITICAL' @("${Prefix}VM tier is Bronze", (& $latency 50)) 'latency')) }
+            States = @(& $state 'CRITICAL' @("${Prefix}VM tier is Bronze", @(& $latency 50)) 'latency') }
         $vm + @{ Name = "${Prefix}VM memory pressure"; Type = 15; SubType = 19; Description = 'A VM is ballooning or swapping because its host is short of memory.'
-            States = @((& $state 'CRITICAL' @(, @("${Prefix}VM swapping in")) 'memory'), (& $state 'WARNING' @(, @("${Prefix}VM memory ballooning above 10 %")) 'memory')) }
+            States = @(& $state 'AUTO' @(, @("${Prefix}VM swapping in", "${Prefix}VM memory ballooning above 10 %")) 'memory') }
         $vm + @{ Name = "${Prefix}VM guest file system nearly full"; Type = 15; SubType = 20; Description = "A VM's guest file systems are nearly full."
-            States = @((& $state 'CRITICAL' @(, @("${Prefix}VM guest file system above 95 %")) 'disk'), (& $state 'WARNING' @(, @("${Prefix}VM guest file system above 90 %")) 'disk')) }
+            States = @(& $state 'AUTO' @(, @("${Prefix}VM guest file system above 95 %", "${Prefix}VM guest file system above 90 %")) 'disk') }
         $esx + @{ Name = "${Prefix}Host memory pressure"; Type = 15; SubType = 19; Description = 'A host is out of memory: usage above 95 % with ballooning.'
             States = @((& $state 'CRITICAL' @("${Prefix}Host memory usage above 95 %", "${Prefix}Host memory ballooning above 5 %") 'memory')) }
         $esx + @{ Name = "${Prefix}Host CPU overcommitted"; Type = 15; SubType = 19; Description = 'A host is asked for more CPU than it has.'
