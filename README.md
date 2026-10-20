@@ -98,7 +98,7 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-Tiering` | `VCFOPS_SYNTH_TIERING` | import | Tiering rules; default `import.tiering` |
 | `-Performance` | `VCFOPS_SYNTH_PERFORMANCE` | import | LiveOptics VMware workbook; default `import.performance` |
 | `-NoAnonymise` | `VCFOPS_SYNTH_NO_ANONYMISE` | import | Keep real names |
-| `-Adapter` | `VCFOPS_SYNTH_ADAPTER` | seed, backfill | vCenter adapter instance; default `seed.adapterInstance` |
+| `-Adapter` | `VCFOPS_SYNTH_ADAPTER` | seed, backfill | Holder adapter instance; default `seed.adapterInstance` (`vcfops-synth holder - do not start`) |
 | `-Refresh` | `VCFOPS_SYNTH_REFRESH` | seed | Push properties and stats to objects already there |
 | `-DryRun` | `VCFOPS_SYNTH_DRY_RUN` | seed, backfill | Report only; change nothing |
 | `-Days` | `VCFOPS_SYNTH_DAYS` | backfill | Days of history; default `backfillDays` |
@@ -123,9 +123,11 @@ docker run --rm -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD
 ```
 ## Seeding
 
-`seed -Adapter <vCenter adapter instance>` builds the inventory as VMWARE objects under that instance, foundations first: an optional Physical Data Center (`seed.physicalDatacenter`), datacenters (linked under the vCenter), clusters, datastores, hosts, distributed switches and port groups, VM folders and VMs. Standard switches and port groups, which VMWARE does not model, go under the `adapterKind.key` push kind. Every relationship is worked out before anything is created.
+`seed -Adapter <holder adapter instance>` builds the inventory as VMWARE objects under that instance, foundations first: an optional Physical Data Center (`seed.physicalDatacenter`), datacenters (linked under the holder instance), clusters, datastores, hosts, distributed switches and port groups, VM folders and VMs. Standard switches and port groups, which VMWARE does not model, go under the `adapterKind.key` push kind. Every relationship is worked out before anything is created.
 
 Rubrics captured from real lab objects (`seed.rubrics`, default `<paths.data>/rubrics`) only say which metrics and properties each kind has. Every value comes from the inventory (RVTools, LiveOptics), is derived from it (for example host use over capacity, cluster roll-ups), or is a neutral placeholder (`-`, `0`, `false`). Keys Operations computes itself (capacity analytics such as time and capacity remaining, badges, alert counts, workload scores, reclamation, rightsizing, sustainability and capacity profiles) are never pushed, so its own results are not masked. Capacity inputs (usable memory, memory demand, total and HA CPU and memory capacity, disk space over the datastores a host or cluster sees) come from the inventory and stay flat through the backfill. Objects keep their inventory names (`seed.prefix` is optional) and carry two vSphere tags in `summary|tag`: `seed.tag` (default `vcfops-synth-synthetic`) and `Project-<project>`, where the project is `seed.project` or the `YYYY.#### ... OPP-n` folder the export was imported from.
+
+The holder (`seed.adapterInstance`, default `vcfops-synth holder - do not start`) is a VMWARE adapter instance of the toolset's own. Seed creates it when it is missing, with a vCenter address that cannot resolve (`synth.invalid`), a `VMEntityVCID` of its own, autodiscovery off and a placeholder credential, and never starts it. The estate must not go under a vCenter adapter instance that collects: when that adapter restarts it marks every object its vCenter does not return as not existing, and groups, policies and alerts then leave them out (seen in the lab on Operations 9.1.1; seed warns when the instance collects). Do not start the holder either, for the same reason. Operations deletes objects that stay not existing once the Deleted Objects window in Global Settings passes (168 hours by default).
 
 Objects that already exist are found by their identifiers, not their names, and skipped; `-Refresh` pushes the planned properties and current stats to them again. `-DryRun` prints the plan.
 

@@ -37,9 +37,11 @@
                           port groups, VM folders and VMs. Objects keep their inventory names and carry
                           the seed.tag and project vSphere tags; values come from the inventory only.
                           Standard switches and port groups go under the toolset's adapter kind.
-                          Every relationship is worked out first, datacenters go under the vCenter, and
-                          objects that already exist (by identifier) are skipped.
-                          -Adapter       vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          Every relationship is worked out first, datacenters go under the holder adapter
+                          instance, and objects that already exist (by identifier) are skipped. The holder
+                          is a VMWARE instance of its own, created if missing and never started: a vCenter
+                          adapter marks objects its vCenter lacks as not existing when it restarts.
+                          -Adapter       holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
                           -Refresh       also push planned properties and current stats to objects already there
                                          (VCFOPS_SYNTH_REFRESH)
                           -DryRun        build and summarise the plan; create nothing (VCFOPS_SYNTH_DRY_RUN)
@@ -48,7 +50,7 @@
                           their average and peak; the rest follow each object's workload curve around its
                           current value, grow (space in use), stay flat (capacity) or stay at zero. A host,
                           cluster or datastore follows the sum of its VMs' curves. Resumes from paths.state.
-                          -Adapter       vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          -Adapter       holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
                           -Days          days of history (VCFOPS_SYNTH_DAYS; default backfillDays)
                           -Kinds         only these kinds, comma-separated: VirtualMachine,HostSystem,...
                                          (VCFOPS_SYNTH_KINDS)
@@ -505,14 +507,16 @@ try {
         'seed' {
             $config = Get-CliConfig
             $adapterName = if ($options.Adapter) { $options.Adapter } else { $config.seed.adapterInstance }
-            if (-not $adapterName) { throw 'No vCenter adapter instance to seed under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
+            if (-not $adapterName) { throw 'No adapter instance to seed under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
             $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
             $inventory = Get-SynthInventory -Path $config.paths.inventory
             $rubrics = Get-SynthRubric -Path $rubricPath
 
             $null = Connect-Cli -Config $config
             try {
-                $target = Resolve-SynthSeedTarget -Name $adapterName
+                $target = Resolve-SynthSeedTarget -Name $adapterName -Create:(-not $options.DryRun)
+                if ($target.Created) { Write-Host "Created holder adapter instance '$adapterName'. Do not start it." }
+                if ($target.Collecting) { Write-Host "Warning: '$adapterName' collects from a vCenter. When it restarts it marks every seeded object its vCenter lacks as not existing, and groups and policies leave them out. Seed under a holder instance instead (seed.adapterInstance)." }
                 $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target
                 $plan = $built.Plan
                 Write-Host "Tags: $(($built.Tags | ForEach-Object { "$($_.Category): $($_.Name)" }) -join '; ')"
@@ -547,7 +551,7 @@ try {
         'backfill' {
             $config = Get-CliConfig
             $adapterName = if ($options.Adapter) { $options.Adapter } else { $config.seed.adapterInstance }
-            if (-not $adapterName) { throw 'No vCenter adapter instance to backfill under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
+            if (-not $adapterName) { throw 'No adapter instance to backfill under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
             $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
             $inventory = Get-SynthInventory -Path $config.paths.inventory
             $rubrics = Get-SynthRubric -Path $rubricPath

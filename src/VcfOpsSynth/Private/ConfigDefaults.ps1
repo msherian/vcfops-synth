@@ -36,8 +36,8 @@ function Get-SynthConfigDefault {
             anonymise   = $true
         }
         seed           = @{
-            # The vCenter adapter instance the synthetic tree goes under, by name (vc-mgmt-a).
-            adapterInstance = ''
+            # The VMWARE adapter instance that holds the synthetic estate, by name; seed creates it, never started.
+            adapterInstance = 'vcfops-synth holder - do not start'
             # Rubrics captured from the lab; empty means <paths.data>/rubrics.
             rubrics         = ''
             # Seeded objects keep their inventory names; a prefix is optional. The tag marks them as synthetic.
