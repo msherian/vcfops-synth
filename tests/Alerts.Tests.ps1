@@ -40,6 +40,29 @@ Describe 'Get-SynthAlertContent' {
     }
 }
 
+Describe 'Alert levels' {
+    It 'gives every alert one state, since Operations keeps only one' {
+        foreach ($a in $script:content.Alerts) { @($a.States).Count | Should -Be 1 -Because $a.Name }
+    }
+
+    It 'lets a two-level alert take its level from symptoms whose critical threshold is above the warning one' {
+        $by = @{}; foreach ($s in $script:content.Symptoms) { $by[$s.Name] = $s }
+        $auto = @($script:content.Alerts | Where-Object { $_.States[0].Severity -eq 'AUTO' })
+        $auto.Count | Should -Be 6
+        foreach ($a in $auto) {
+            $levels = @(foreach ($item in $a.States[0].All) { if ($item -isnot [string]) { foreach ($n in $item) { $by[$n] } } })
+            @($levels | Where-Object Severity -eq 'CRITICAL').Count | Should -BeGreaterThan 0 -Because $a.Name
+            @($levels | Where-Object Severity -eq 'WARNING').Count | Should -BeGreaterThan 0 -Because $a.Name
+            # Where both levels watch the same metric, the critical threshold is the higher one.
+            foreach ($key in @($levels | ForEach-Object Key | Sort-Object -Unique)) {
+                $crit = @($levels | Where-Object { $_.Key -eq $key -and $_.Severity -eq 'CRITICAL' })
+                $warn = @($levels | Where-Object { $_.Key -eq $key -and $_.Severity -eq 'WARNING' })
+                if ($crit.Count -and $warn.Count) { $crit[0].Value | Should -BeGreaterThan $warn[0].Value -Because "$($a.Name) on $key" }
+            }
+        }
+    }
+}
+
 Describe 'ConvertTo-SynthSymptomBody' {
     It 'writes a static metric condition' {
         $d = $script:content.Symptoms | Where-Object Name -eq 'Synth-VM CPU ready above 5 %'
@@ -60,12 +83,12 @@ Describe 'ConvertTo-SynthSymptomBody' {
 
 Describe 'ConvertTo-SynthAlertBody' {
     It 'makes one AND set when every symptom must hold' {
-        $d = $script:content.Alerts | Where-Object Name -eq 'Synth-Gold VM CPU contention'
-        $json = ConvertTo-SynthAlertBody -Definition $d -SymptomId $script:ids -RecommendationId @{ cpu = 'rec-1' } | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-        "$($json.type)/$($json.subType) $($json.resourceKindKey)" | Should -Be '15/19 VirtualMachine'
-        $json.states.Count | Should -Be 2
+        $d = $script:content.Alerts | Where-Object Name -eq 'Synth-Host memory pressure'
+        $json = ConvertTo-SynthAlertBody -Definition $d -SymptomId $script:ids -RecommendationId @{ memory = 'rec-1' } | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        "$($json.type)/$($json.subType) $($json.resourceKindKey)" | Should -Be '15/19 HostSystem'
+        @($json.states).Count | Should -Be 1
         $set = $json.states[0].'base-symptom-set'
-        "$($set.type) $($set.symptomSetOperator) $($set.symptomDefinitionIds -join ',')" | Should -Be ("SYMPTOM_SET AND {0},{1}" -f $script:ids['Synth-VM tier is Gold'], $script:ids['Synth-VM CPU ready above 5 %'])
+        "$($set.type) $($set.symptomSetOperator) $($set.symptomDefinitionIds -join ',')" | Should -Be ("SYMPTOM_SET AND {0},{1}" -f $script:ids['Synth-Host memory usage above 95 %'], $script:ids['Synth-Host memory ballooning above 5 %'])
         $json.states[0].recommendationPriorityMap.'rec-1' | Should -Be 1
         $json.states[0].impact.detail | Should -Be 'HEALTH'
     }
@@ -73,11 +96,12 @@ Describe 'ConvertTo-SynthAlertBody' {
     It 'joins a tier symptom and an any-of group with a composite AND' {
         $d = $script:content.Alerts | Where-Object Name -eq 'Synth-Silver VM disk latency'
         $json = ConvertTo-SynthAlertBody -Definition $d -SymptomId $script:ids | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+        $json.states[0].severity | Should -Be 'AUTO'
         $base = $json.states[0].'base-symptom-set'
         "$($base.type) $($base.operator)" | Should -Be 'SYMPTOM_SET_COMPOSITE AND'
         $sets = @($base.'symptom-sets')
         "$($sets[0].symptomSetOperator) $($sets[0].symptomDefinitionIds -join ',')" | Should -Be "AND $($script:ids['Synth-VM tier is Silver'])"
-        "$($sets[1].symptomSetOperator) $($sets[1].symptomDefinitionIds -join ',')" | Should -Be ('OR {0},{1}' -f $script:ids['Synth-VM disk read latency above 40 ms'], $script:ids['Synth-VM disk write latency above 40 ms'])
+        "$($sets[1].symptomSetOperator) $($sets[1].symptomDefinitionIds -join ',')" | Should -Be ('OR {0},{1},{2},{3}' -f $script:ids['Synth-VM disk read latency above 40 ms'], $script:ids['Synth-VM disk write latency above 40 ms'], $script:ids['Synth-VM disk read latency above 20 ms (warning)'], $script:ids['Synth-VM disk write latency above 20 ms (warning)'])
         $json.states[0].PSObject.Properties['recommendationPriorityMap'] | Should -BeNullOrEmpty
     }
 
@@ -129,8 +153,9 @@ Describe 'Publish-SynthAlertContent' {
         $null = Publish-SynthAlertContent -Content $script:content -Prefix 'Synth-'
         $alert = ($script:calls | Where-Object { $_.Path -eq 'alertdefinitions' -and $_.Method -eq 'Post' -and $_.Body.name -eq 'Synth-Gold VM CPU contention' }).Body
         $json = $alert | ConvertTo-Json -Depth 20 | ConvertFrom-Json
-        $json.states[0].'base-symptom-set'.symptomDefinitionIds[0] | Should -Be 'sym-old'
-        $json.states[0].'base-symptom-set'.symptomDefinitionIds[1] | Should -BeLike 'new-*'
+        $sets = @($json.states[0].'base-symptom-set'.'symptom-sets')
+        $sets[0].symptomDefinitionIds[0] | Should -Be 'sym-old'
+        $sets[1].symptomDefinitionIds[0] | Should -BeLike 'new-*'
         @($json.states[0].recommendationPriorityMap.PSObject.Properties.Name)[0] | Should -BeLike 'new-*'
         $sm = ($script:calls | Where-Object { $_.Path -eq 'supermetrics' -and $_.Body.name -eq 'Synth-Tier VM health' }).Body
         "$($sm.resourceKinds[0].adapterKindKey)/$($sm.resourceKinds[0].resourceKindKey)" | Should -Be 'Container/Service Level Objective'
