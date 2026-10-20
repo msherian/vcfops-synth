@@ -71,7 +71,7 @@ function Get-SynthViewContent {
                 (& $col 'cpu|usage_average' 'CPU usage (%, avg)' 'AVG')
                 (& $col 'cpu|readyPct' 'CPU ready (%, max)' 'MAX')
                 (& $col 'mem|usage_average' 'Memory usage (%, avg)' 'AVG')
-                (& $col 'virtualDisk|totalReadLatency_average' 'Disk read latency (ms, max)' 'MAX')
+                (& $col 'virtualDisk:Aggregate of all instances|totalReadLatency_average' 'Disk read latency (ms, max)' 'MAX')
                 (& $super 'VM CPU demand over allocation' 'CPU demand over allocation (%, avg)' 'AVG')
             ) }
         $vm + @{ Name = "${Prefix}Oversized VMs"; Days = 30; Filter = @(& $flag 'summary|oversized')
