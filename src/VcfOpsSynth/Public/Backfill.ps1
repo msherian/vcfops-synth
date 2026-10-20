@@ -83,6 +83,11 @@ function Invoke-SynthBackfill {
         as busy (429 or 5xx) get up to RetryPasses more tries at the end of the run,
         one object at a time.
 
+        In the lab, Operations also answered 2xx to posts it then never stored, for a
+        few objects at a time after a restart. So after VerifyDelaySeconds the last
+        point of each pushed object's first and last series is read back; an object
+        missing either is taken out of the done list and reported, for the next run.
+
         Run Connect-SynthOps first.
 
     .PARAMETER Spec
@@ -117,6 +122,10 @@ function Invoke-SynthBackfill {
         Passes at the end of the run over the objects refused as busy, one object at a time,
         each after a wait of MaxRetryDelaySeconds.
 
+    .PARAMETER VerifyDelaySeconds
+        Wait before reading back the pushed objects' last points, since Operations stores
+        posted points a few minutes after answering. 0 skips the check.
+
     .EXAMPLE
         Invoke-SynthBackfill -Spec $spec -Range (Get-SynthBackfillRange -Days 30) -StatePath ./data/state.json
     #>
@@ -132,14 +141,15 @@ function Invoke-SynthBackfill {
         [ValidateRange(1000, 5000000)][int]$MaxSamplesPerCall = 100000,
         [ValidateRange(0, 30)][int]$MaxRetries = 10,
         [ValidateRange(1, 600)][int]$MaxRetryDelaySeconds = 60,
-        [ValidateRange(0, 10)][int]$RetryPasses = 2
+        [ValidateRange(0, 10)][int]$RetryPasses = 2,
+        [ValidateRange(0, 3600)][int]$VerifyDelaySeconds = 300
     )
 
     if (-not $script:OpsSession) { throw 'Not signed in to VCF Operations; run Connect-SynthOps first.' }
     $state = Read-SynthBackfillState -Path $StatePath -Range $Range
     $done = [System.Collections.Generic.HashSet[string]]::new([string[]]@($state.done))
     $todo = @($Spec | Where-Object { -not $done.Contains($_.Key) })
-    $result = [ordered]@{ objects = 0; samples = 0L; calls = 0; skipped = $Spec.Count - $todo.Count; failed = [System.Collections.Generic.List[string]]::new(); splits = 0; seconds = 0 }
+    $result = [ordered]@{ objects = 0; samples = 0L; calls = 0; skipped = $Spec.Count - $todo.Count; failed = [System.Collections.Generic.List[string]]::new(); splits = 0; refused = [System.Collections.Generic.List[string]]::new(); unstored = 0; seconds = 0 }
     if (-not $todo.Count) { return $result }
     if (-not $PSCmdlet.ShouldProcess("$($todo.Count) objects, $($state.range.Points) points each", 'Backfill history')) { return $result }
 
@@ -173,6 +183,7 @@ function Invoke-SynthBackfill {
             foreach ($r in $outcome) {
                 $result.calls += $r.Calls
                 $result.splits += $r.Splits
+                if ($r.Refusals -and -not $result.refused.Contains($r.Key)) { $result.refused.Add($r.Key) }
                 if ($r.Status -eq 0) {
                     $result.objects++
                     $result.samples += $r.Samples
@@ -197,9 +208,44 @@ function Invoke-SynthBackfill {
         if ($busy.Count -and $passes.Count -le $RetryPasses) { $passes += @{ Name = "retry pass $($passes.Count) of $RetryPasses"; Objects = $busy; Concurrency = 1 } }
     }
     Write-Progress -Activity 'Backfilling history' -Completed
+    # Read back what this run pushed: an object whose last points are missing was answered but not stored.
+    $pushed = @($todo | Where-Object { $done.Contains($_.Key) })
+    if ($VerifyDelaySeconds -and $pushed.Count) {
+        Write-Verbose ('{0:HH:mm:ss}Z checking that Operations stored the {1} objects pushed, in {2} s' -f [DateTime]::UtcNow, $pushed.Count, $VerifyDelaySeconds)
+        Start-Sleep -Seconds $VerifyDelaySeconds
+        $missing = @(Get-SynthBackfillUnstored -Spec $pushed -Range $state.range)
+        foreach ($key in $missing) {
+            $null = $done.Remove($key)
+            $result.objects--
+            $result.unstored++
+            $result.failed.Add("${key}: posted and answered, but Operations has not stored its last points; run backfill again")
+        }
+        if ($missing.Count) { $state.done = @($done); Save-SynthBackfillState -Path $StatePath -State $state }
+        Write-Verbose ('{0:HH:mm:ss}Z read back {1} objects: {2} not stored' -f [DateTime]::UtcNow, $pushed.Count, $missing.Count)
+    }
     foreach ($r in $failure.Values) { $result.failed.Add("$($r.Key): $($r.Error)") }
     $result.seconds = [int]$clock.Elapsed.TotalSeconds
     $result
+}
+
+function Get-SynthBackfillUnstored {
+    <# Keys of the objects whose first or last series lacks the range's last point in Operations. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][VcfOpsSynth.ObjectSpec[]]$Spec,
+        [Parameter(Mandatory)][hashtable]$Range
+    )
+    $last = [long]$Range.EndMs
+    foreach ($o in $Spec) {
+        if (-not $o.Series.Count) { continue }
+        $keys = @($o.Series[0].Key, $o.Series[-1].Key) | Select-Object -Unique
+        $query = "begin=$($last - [long]$Range.StepMs)&end=$($last + 1)&" + (($keys | ForEach-Object { 'statKey=' + [uri]::EscapeDataString($_) }) -join '&')
+        $reply = Invoke-SynthOpsRequest -Method Get -Path "resources/$($o.ResourceId)/stats?$query"
+        $held = @{}
+        foreach ($stat in @($reply.values | ForEach-Object { $_.'stat-list'.stat })) { if ($stat -and @($stat.timestamps) -contains $last) { $held[$stat.statKey.key] = $true } }
+        if (@($keys | Where-Object { -not $held[$_] }).Count) { $o.Key }
+    }
 }
 
 function Invoke-SynthBackfillEngine {

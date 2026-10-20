@@ -279,6 +279,32 @@ Describe 'Backfill engine against a server that refuses large bodies' {
     }
 }
 
+Describe 'Get-SynthBackfillUnstored' {
+    BeforeAll {
+        $script:range = @{ StartMs = $script:start; EndMs = $script:start + 8639L * $script:step; StepMs = $script:step; Points = 8640; Days = 30 }
+        $script:objs = [VcfOpsSynth.ObjectSpec[]]@(1..3 | ForEach-Object { New-TestObjectSpec -Key "vm-$_" -Series @((New-TestSeries -Key 'cpu|usage_average' -Mode Constant -A 1), (New-TestSeries -Key 'guestfilesystem:D:\|usage' -Mode Constant -A 1)) })
+        for ($n = 0; $n -lt 3; $n++) { $script:objs[$n].ResourceId = "res-$($n + 1)" }
+    }
+
+    It 'returns the objects missing the last point on their first or last series, and asks for both keys escaped' {
+        Mock -ModuleName VcfOpsSynth Invoke-SynthOpsRequest {
+            # The last point is the request's end minus one; one step is the gap between begin and it.
+            $last = [long]([regex]::Match($Path, 'end=(\d+)').Groups[1].Value) - 1
+            $oneStep = $last - [long]([regex]::Match($Path, 'begin=(\d+)').Groups[1].Value)
+            $stat = { param($k, $ts) [pscustomobject]@{ statKey = [pscustomobject]@{ key = $k }; timestamps = @($ts) } }
+            $stats = switch -Wildcard ($Path) {
+                'resources/res-1/*' { @((& $stat 'cpu|usage_average' $last), (& $stat 'guestfilesystem:D:\|usage' $last)) }
+                'resources/res-2/*' { @((& $stat 'cpu|usage_average' $last), (& $stat 'guestfilesystem:D:\|usage' ($last - $oneStep))) }
+                default { @() }
+            }
+            [pscustomobject]@{ values = @([pscustomobject]@{ 'stat-list' = [pscustomobject]@{ stat = $stats } }) }
+        }
+        $missing = @(InModuleScope VcfOpsSynth -Parameters @{ Objs = $script:objs; Range = $script:range } { param($Objs, $Range) Get-SynthBackfillUnstored -Spec $Objs -Range $Range })
+        $missing | Should -Be @('vm-2', 'vm-3')
+        Should -Invoke -ModuleName VcfOpsSynth Invoke-SynthOpsRequest -Times 1 -ParameterFilter { $Path -like 'resources/res-1/stats?*statKey=cpu%7Cusage_average&statKey=guestfilesystem%3AD%3A%5C%7Cusage' }
+    }
+}
+
 Describe 'Invoke-SynthBackfill' {
     BeforeAll {
         $script:specs = [VcfOpsSynth.ObjectSpec[]]@(1..5 | ForEach-Object { New-TestObjectSpec -Key "vm-$_" -Series @(New-TestSeries -Key 'cpu|usage_average' -Mode Constant -A 1) })
@@ -290,6 +316,8 @@ Describe 'Invoke-SynthBackfill' {
         InModuleScope VcfOpsSynth { $script:OpsSession = @{ BaseUri = 'https://ops.example.test/suite-api'; Token = 't1'; SkipCertificateCheck = $true; TimeoutSec = 60; Config = @{}; Password = $null } }
         Mock -ModuleName VcfOpsSynth Invoke-SynthOpsRequest { }
         Mock -ModuleName VcfOpsSynth Connect-SynthOps { }
+        Mock -ModuleName VcfOpsSynth Start-Sleep { }
+        Mock -ModuleName VcfOpsSynth Get-SynthBackfillUnstored { }
         Mock -ModuleName VcfOpsSynth Invoke-SynthBackfillEngine {
             foreach ($o in $Batch) { $r = [VcfOpsSynth.PushResult]::new(); $r.Key = $o.Key; $r.Calls = 1; $r.Samples = 8640; $r }
         }
@@ -368,6 +396,33 @@ Describe 'Invoke-SynthBackfill' {
         $result.failed | Should -HaveCount 1
         $result.failed[0] | Should -BeLike 'vm-1: HTTP 500*'
         Should -Invoke -ModuleName VcfOpsSynth Invoke-SynthBackfillEngine -Times 2
+    }
+
+    It 'reads back the pushed objects after the wait and reports the ones not stored' {
+        Mock -ModuleName VcfOpsSynth Get-SynthBackfillUnstored { 'vm-2' }
+        $result = Invoke-SynthBackfill -Spec $script:specs -Range $script:range -StatePath $script:statePath -VerifyDelaySeconds 120
+        Should -Invoke -ModuleName VcfOpsSynth Start-Sleep -ParameterFilter { $Seconds -eq 120 }
+        Should -Invoke -ModuleName VcfOpsSynth Get-SynthBackfillUnstored -Times 1 -ParameterFilter { $Spec.Count -eq 5 }
+        $result.objects | Should -Be 4
+        $result.unstored | Should -Be 1
+        $result.failed | Should -HaveCount 1
+        $result.failed[0] | Should -BeLike 'vm-2: posted and answered, but Operations has not stored*'
+        @((Get-Content $script:statePath -Raw | ConvertFrom-Json).backfill.done) | Should -Not -Contain 'vm-2'
+    }
+
+    It 'skips the read-back with VerifyDelaySeconds 0' {
+        $null = Invoke-SynthBackfill -Spec $script:specs -Range $script:range -StatePath $script:statePath -VerifyDelaySeconds 0
+        Should -Invoke -ModuleName VcfOpsSynth Get-SynthBackfillUnstored -Times 0
+    }
+
+    It 'lists the objects that had a post refused, even when they went in later' {
+        Mock -ModuleName VcfOpsSynth Invoke-SynthBackfillEngine {
+            foreach ($o in $Batch) { $r = [VcfOpsSynth.PushResult]::new(); $r.Key = $o.Key; $r.Calls = 1; $r.Samples = 8640; if ($o.Key -eq 'vm-5') { $r.Refusals = 3; $r.Splits = 1 }; $r }
+        }
+        $result = Invoke-SynthBackfill -Spec $script:specs -Range $script:range -StatePath $script:statePath
+        $result.objects | Should -Be 5
+        @($result.refused) | Should -Be @('vm-5')
+        $result.splits | Should -Be 1
     }
 
     It 'hands the retry settings to the engine' {

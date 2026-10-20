@@ -595,7 +595,7 @@ try {
                     if ($state -and $state.ContainsKey('backfill')) { $state.Remove('backfill'); $state | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $config.paths.state -Encoding utf8 }
                 }
                 $result = Invoke-SynthBackfill -Spec $spec -Range $range -StatePath $config.paths.state -TimeZone $config.timeZone -Concurrency $(if ($options.Concurrency) { $options.Concurrency } else { 4 }) -MaxSamplesPerCall $(if ($options.MaxSamples) { $options.MaxSamples } else { 100000 }) -Verbose
-                Write-Host ('  {0} objects pushed, {1:N0} samples in {2:N0} calls, {3} s ({4:N0} samples/s); {5} already done; {6} posts halved after a refusal' -f $result.objects, $result.samples, $result.calls, $result.seconds, $(if ($result.seconds) { $result.samples / $result.seconds } else { 0 }), $result.skipped, $result.splits)
+                Write-Host ('  {0} objects pushed, {1:N0} samples in {2:N0} calls, {3} s ({4:N0} samples/s); {5} already done; {6} posts halved after a refusal; {7} objects had a post refused; {8} answered but not stored' -f $result.objects, $result.samples, $result.calls, $result.seconds, $(if ($result.seconds) { $result.samples / $result.seconds } else { 0 }), $result.skipped, $result.splits, $result.refused.Count, $result.unstored)
                 foreach ($failure in $result.failed) { Write-Host "Failed: $failure" }
             }
             finally {

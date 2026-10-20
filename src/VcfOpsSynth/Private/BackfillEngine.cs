@@ -55,6 +55,7 @@ namespace VcfOpsSynth
         public int Status;      // 0 = all calls succeeded; otherwise the HTTP status of the first failure.
         public string Error;
         public int Splits;      // Bodies halved because Operations refused them with a 500.
+        public int Refusals;    // Answers other than 2xx, including those later retried or halved.
     }
 
     public static class Backfill
@@ -374,6 +375,7 @@ namespace VcfOpsSynth
                                         try { resp = await client.SendAsync(req).ConfigureAwait(false); status = (int)resp.StatusCode; }
                                         catch (Exception e) { status = 599; detail = e.Message; }
                                         if (status >= 200 && status < 300) { r.Calls++; resp?.Dispose(); start = end; break; }
+                                        r.Refusals++;
                                         // Some Operations nodes refuse large bodies with 500: halve the body, for this and
                                         // later objects, and post again; a single series falls back to plain retries.
                                         if (status >= 500 && status != 503 && end - start > 1)
