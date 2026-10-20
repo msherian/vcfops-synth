@@ -296,3 +296,19 @@ Describe 'Invoke-SynthBackfill' {
         Test-Path $script:statePath | Should -BeFalse
     }
 }
+
+Describe 'Get-SynthCalibration keys' {
+    It 'puts a VM''s LiveOptics IOPS and latency on the aggregate disk instance, as the vCenter adapter writes them' {
+        $vm = @{ id = 'vm-1'; powerState = 'poweredOn'; cpu = @{ capacityMhz = 2000 }; memory = @{ sizeMiB = 1024 }
+            baseline = @{ perf = @{ readIopsAvg = 5; readIopsPeak = 50; writeIopsAvg = 2; writeIopsPeak = 20; readLatencyAvgMs = 1.5; readLatencyPeakMs = 9; writeLatencyAvgMs = 2; writeLatencyPeakMs = 12; readMBpsAvg = 1; readMBpsPeak = 4 } } }
+        $keys = @(InModuleScope VcfOpsSynth -Parameters @{ Vm = $vm } { param($Vm) (Get-SynthCalibration -Kind 'VirtualMachine' -Item $Vm).Keys })
+
+        foreach ($leaf in 'numberReadAveraged_average', 'numberWriteAveraged_average', 'totalReadLatency_average', 'totalWriteLatency_average') {
+            $keys | Should -Contain "virtualDisk:Aggregate of all instances|$leaf"
+            $keys | Should -Not -Contain "virtualDisk|$leaf"
+        }
+        # Throughput has a plain key on real VMs.
+        $keys | Should -Contain 'virtualDisk|read_average'
+        $keys | Should -Contain 'storage|totalReadLatency_average'
+    }
+}

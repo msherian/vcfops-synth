@@ -383,12 +383,12 @@ function Get-SynthDerivedStat {
                 $d['guestfilesystem|percentage_total'] = & $pct $useGb $capGb
             }
             if ($perf -and $on) {
-                $d['virtualDisk|numberReadAveraged_average'] = & $num (& $pf 'readIopsAvg')
-                $d['virtualDisk|numberWriteAveraged_average'] = & $num (& $pf 'writeIopsAvg')
+                $d['virtualDisk:Aggregate of all instances|numberReadAveraged_average'] = & $num (& $pf 'readIopsAvg')
+                $d['virtualDisk:Aggregate of all instances|numberWriteAveraged_average'] = & $num (& $pf 'writeIopsAvg')
                 $d['virtualDisk|read_average'] = (& $num (& $pf 'readMBpsAvg')) * 1024
                 $d['virtualDisk|write_average'] = (& $num (& $pf 'writeMBpsAvg')) * 1024
-                $d['virtualDisk|totalReadLatency_average'] = & $num (& $pf 'readLatencyAvgMs')
-                $d['virtualDisk|totalWriteLatency_average'] = & $num (& $pf 'writeLatencyAvgMs')
+                $d['virtualDisk:Aggregate of all instances|totalReadLatency_average'] = & $num (& $pf 'readLatencyAvgMs')
+                $d['virtualDisk:Aggregate of all instances|totalWriteLatency_average'] = & $num (& $pf 'writeLatencyAvgMs')
                 $d['storage|totalReadLatency_average'] = & $num (& $pf 'readLatencyAvgMs')
                 $d['storage|totalWriteLatency_average'] = & $num (& $pf 'writeLatencyAvgMs')
             }
