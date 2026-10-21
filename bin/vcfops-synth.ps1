@@ -127,7 +127,7 @@
                                           super metrics and custom groups; views and dashboards stay
                                           (VCFOPS_SYNTH_INCLUDE_CONTENT)
                           -DryRun         report only, even with -Force (VCFOPS_SYNTH_DRY_RUN)
-                          -Adapter        vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          -Adapter        holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
 
     Commands still to come, by build phase:
         live-load         Phase 9   Optional UPSA and load VMs
