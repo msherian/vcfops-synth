@@ -7,7 +7,7 @@ The image `ghcr.io/msherian/vcfops-synth` runs every command the script does. It
 ### Folders
 
 ```text
-config/lab.json          from config/lab.example.json; set operations.fqdn and seed.adapterInstance
+config/lab.json          from config/lab.example.json; set operations.fqdn
 config/tiering.json      from config/tiering.example.json (import only)
 data/rvtools.xlsx        the RVTools export (import only)
 data/rubrics/            the rubrics captured from this lab (spike 0.5); seed and backfill need them
@@ -41,7 +41,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   ghcr.io/msherian/vcfops-synth connect-test
 ```
 
-- The container's user must be able to read the file. If it can't, the error reads `is not valid JSON`, which is misleading, so check the file's owner and mode first.
+- The container's user must be able to read the file. If it can't, sign-in stops with `cannot be read`; check the file's owner and mode.
 - `config` prints the host it picked from the file, but never the password.
 - Alternatives:
   - a password file (`-e VCFOPS_PASSWORD_FILE=/run/secrets/ops-pass` with that file mounted);
@@ -49,6 +49,17 @@ docker run --rm --user "$(id -u):$(id -g)" \
   - `VCFOPS_PASSWORD` in the environment, which leaves the password visible in `docker inspect`.
 
 On PowerShell (Windows), replace `$PWD/...` with `${PWD}/...` and `$HOME` with `$env:USERPROFILE`. Write each `docker run` on one line, or end lines with a backtick instead of `\`.
+
+### Before you start (testers)
+
+Read these before pointing the image at a VCF Operations instance:
+
+- **Use a lab, not production.** Seed creates about as many objects as the RVTools export holds, and content publishes groups, policies, alerts, views and reports. Views and dashboards cannot be deleted through the API.
+- **The holder adapter instance.** Seed creates a VMWARE adapter instance called `vcfops-synth holder - do not start` (`seed.adapterInstance`) and puts the whole synthetic estate under it. It has a vCenter address that cannot resolve and a placeholder credential. **Never start it.** Starting it makes it look for its vCenter, and every object under it is marked not existing. It may show as not collecting; that is expected.
+- **Not existing means deleted after 7 days.** Operations deletes objects that stay not existing once the Deleted Objects window in Global Settings passes (168 hours by default). Do not seed under a real vCenter adapter instance: when it restarts it marks every object its vCenter does not have as not existing, groups empty out, and a week later the objects are gone. Seed warns if the instance you name collects.
+- **Expect retries on a small Operations.** Backfill keeps each post under `-MaxSamples` and halves it when Operations refuses it, retrying with growing waits. The summary lists objects that were refused, or answered but not stored; run backfill again to fill them in.
+- **Clean up with reset.** `reset` reports only; `reset -Force` deletes the seeded objects (found by tag and identifier, never by name), and `-IncludeContent` also deletes the Synth- groups, policies, alerts, symptoms and super metrics. Views, dashboards and the holder instance stay; delete those in the UI.
+- **Report problems** with the command, the summary lines and the Operations version. Leave out host names, object names and credentials.
 
 ### Seed and backfill
 
@@ -69,6 +80,30 @@ docker run "${opts[@]}" "$img" backfill -Concurrency 2
 - **Resuming:** backfill saves its progress to `/data/state.json`. If the container stops, the same command resumes where it left off; `-Restart` starts afresh.
 - **Long runs:** run detached (`-d --name synth-backfill` in place of `--rm`) and follow progress with `docker logs -f synth-backfill`.
 - **Memory:** on a small host such as 8 GB, use `-Concurrency 2`. Also watch the first minutes with `docker stats`. On 15 October 2026 a backfill at concurrency 4 on the 8 GB jump host ran out of memory; the engine has streamed its requests since then.
+
+### Content, live feed and scenarios
+
+```bash
+docker run "${opts[@]}" "$img" content -DryRun
+docker run "${opts[@]}" "$img" content
+docker run -d --name synth-feed --restart unless-stopped --user "$(id -u):$(id -g)" \
+  -v "$PWD/config:/config" -v "$PWD/data:/data" \
+  -v "$HOME/vcf-installer-creds.json:/run/secrets/vcf-creds.json:ro" \
+  -e VCFOPS_CREDENTIAL_FILE=/run/secrets/vcf-creds.json "$img" feed
+docker run "${opts[@]}" "$img" scenario -Start S1
+docker run "${opts[@]}" "$img" scenario -Stop all
+```
+
+- `feed` pushes a point every five minutes until stopped and keeps its place in `/data/state.json`, so a restarted container never pushes a point twice. Between pushes it is quiet; that is not a hang.
+- A running feed picks up scenario changes on its next cycle.
+
+### Clean up
+
+```bash
+docker run "${opts[@]}" "$img" reset                          # report only
+docker run "${opts[@]}" "$img" reset -Force -IncludeContent
+docker rm -f synth-feed
+```
 
 ### Name resolution
 
