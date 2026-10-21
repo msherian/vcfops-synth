@@ -54,6 +54,8 @@ namespace VcfOpsSynth
         public long Samples;
         public int Status;      // 0 = all calls succeeded; otherwise the HTTP status of the first failure.
         public string Error;
+        public int Splits;      // Bodies halved because Operations refused them with a 500.
+        public int Refusals;    // Answers other than 2xx, including those later retried or halved.
     }
 
     public static class Backfill
@@ -277,37 +279,61 @@ namespace VcfOpsSynth
         // The same bodies made one at a time, so only the body being posted is held in memory.
         public static IEnumerable<string> BodyStream(ObjectSpec o, long startMs, int stepMs, double[] how, int maxSamples)
         {
-            int n = how.Length;
-            var tsb = new StringBuilder(n * 15);
-            for (int i = 0; i < n; i++) { if (i > 0) tsb.Append(','); tsb.Append((startMs + (long)i * stepMs).ToString(CultureInfo.InvariantCulture)); }
-            string timestamps = tsb.ToString();
+            string timestamps = Timestamps(startMs, stepMs, how.Length);
             var shape = Shape(o, how, stepMs);
-            int perBody = Math.Max(1, maxSamples / Math.Max(1, n));
+            int perBody = SeriesPerBody(maxSamples, how.Length);
             for (int start = 0; start < o.Series.Length; start += perBody)
-            {
-                var sb = new StringBuilder();
-                sb.Append("{\"stat-content\":[");
-                int end = Math.Min(o.Series.Length, start + perBody);
-                for (int j = start; j < end; j++)
-                {
-                    var s = o.Series[j];
-                    var v = Values(s, shape, stepMs);
-                    if (j > start) sb.Append(',');
-                    sb.Append("{\"statKey\":\"").Append(Escape(s.Key)).Append("\",\"timestamps\":[").Append(timestamps).Append("],\"data\":[");
-                    for (int i = 0; i < n; i++) { if (i > 0) sb.Append(','); AppendNumber(sb, v[i]); }
-                    sb.Append("]}");
-                }
-                sb.Append("]}");
-                yield return sb.ToString();
-            }
+                yield return Body(o, timestamps, shape, stepMs, start, Math.Min(o.Series.Length, start + perBody));
         }
 
-        // Generates and posts each object's history, several objects at a time. 429 and 5xx are retried;
+        // Series that fit in one body of at most maxSamples samples; at least one.
+        public static int SeriesPerBody(int maxSamples, int points) { return Math.Max(1, maxSamples / Math.Max(1, points)); }
+
+        static string Timestamps(long startMs, int stepMs, int n)
+        {
+            var tsb = new StringBuilder(n * 15);
+            for (int i = 0; i < n; i++) { if (i > 0) tsb.Append(','); tsb.Append((startMs + (long)i * stepMs).ToString(CultureInfo.InvariantCulture)); }
+            return tsb.ToString();
+        }
+
+        // The body for series start to end - 1 of one object.
+        static string Body(ObjectSpec o, string timestamps, double[] shape, int stepMs, int start, int end)
+        {
+            int n = shape.Length;
+            var sb = new StringBuilder();
+            sb.Append("{\"stat-content\":[");
+            for (int j = start; j < end; j++)
+            {
+                var s = o.Series[j];
+                var v = Values(s, shape, stepMs);
+                if (j > start) sb.Append(',');
+                sb.Append("{\"statKey\":\"").Append(Escape(s.Key)).Append("\",\"timestamps\":[").Append(timestamps).Append("],\"data\":[");
+                for (int i = 0; i < n; i++) { if (i > 0) sb.Append(','); AppendNumber(sb, v[i]); }
+                sb.Append("]}");
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        // Seconds to wait before retry number attempt (1 = the first): Retry-After when the server gives it,
+        // else 2, 4, 8, 16 and so on, capped at maxDelaySeconds.
+        public static int RetryDelaySeconds(int attempt, int maxDelaySeconds, TimeSpan? retryAfter)
+        {
+            int cap = Math.Max(1, maxDelaySeconds);
+            if (retryAfter.HasValue && retryAfter.Value > TimeSpan.Zero) return (int)Math.Min(cap, Math.Ceiling(retryAfter.Value.TotalSeconds));
+            return (int)Math.Min(cap, 2L << Math.Min(30, Math.Max(0, attempt - 1)));
+        }
+
+        // Generates and posts each object's history, several objects at a time. 429 and 5xx are retried up to
+        // maxRetries times per body, so a busy Operations that refuses writes for a few minutes is waited out;
         // any other failure stops that object and is reported, so the caller can sign in again or retry.
         public static PushResult[] Run(string baseUri, string token, bool skipCertificateCheck, ObjectSpec[] objects,
-            long startMs, int stepMs, int points, string timeZoneId, int concurrency, int maxSamples, int timeoutSeconds)
+            long startMs, int stepMs, int points, string timeZoneId, int concurrency, int maxSamples, int timeoutSeconds,
+            int maxRetries, int maxDelaySeconds)
         {
             var how = HourOfWeek(startMs, stepMs, points, timeZoneId);
+            // Series per body, shared by the objects of this call so a size Operations refuses is learned once.
+            int perBody = SeriesPerBody(maxSamples, how.Length);
             var handler = new HttpClientHandler();
             if (skipCertificateCheck) handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;
             using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) })
@@ -326,11 +352,15 @@ namespace VcfOpsSynth
                         try
                         {
                             long samples = (long)o.Series.Length * how.Length;
-                            // One body at a time: a large VM is millions of samples, too many to hold for several objects at once.
-                            var bodies = BodyStream(o, startMs, stepMs, how, maxSamples);
+                            string timestamps = Timestamps(startMs, stepMs, how.Length);
+                            var shape = Shape(o, how, stepMs);
                             string uri = baseUri.TrimEnd('/') + "/api/resources/" + o.ResourceId + "/stats?disableAnalyticsProcessing=true";
-                            foreach (var body in bodies)
+                            // One body at a time: a large VM is millions of samples, too many to hold for several objects at once.
+                            int start = 0;
+                            while (start < o.Series.Length)
                             {
+                                int end = Math.Min(o.Series.Length, start + Volatile.Read(ref perBody));
+                                string body = Body(o, timestamps, shape, stepMs, start, end);
                                 int attempt = 0;
                                 while (true)
                                 {
@@ -344,9 +374,21 @@ namespace VcfOpsSynth
                                         string detail = null;
                                         try { resp = await client.SendAsync(req).ConfigureAwait(false); status = (int)resp.StatusCode; }
                                         catch (Exception e) { status = 599; detail = e.Message; }
-                                        if (status >= 200 && status < 300) { r.Calls++; resp?.Dispose(); break; }
+                                        if (status >= 200 && status < 300) { r.Calls++; resp?.Dispose(); start = end; break; }
+                                        r.Refusals++;
+                                        // Some Operations nodes refuse large bodies with 500: halve the body, for this and
+                                        // later objects, and post again; a single series falls back to plain retries.
+                                        if (status >= 500 && status != 503 && end - start > 1)
+                                        {
+                                            resp?.Dispose();
+                                            int half = Math.Max(1, (end - start) / 2);
+                                            int seen;
+                                            while ((seen = Volatile.Read(ref perBody)) > half && Interlocked.CompareExchange(ref perBody, half, seen) != seen) { }
+                                            r.Splits++;
+                                            goto again;
+                                        }
                                         bool retry = status == 429 || status >= 500;
-                                        if (!retry || attempt >= 4)
+                                        if (!retry || attempt >= maxRetries)
                                         {
                                             if (resp != null && detail == null) { try { detail = await resp.Content.ReadAsStringAsync().ConfigureAwait(false); } catch { } }
                                             resp?.Dispose();
@@ -354,11 +396,13 @@ namespace VcfOpsSynth
                                             r.Error = detail == null ? "HTTP " + status : ("HTTP " + status + ": " + (detail.Length > 300 ? detail.Substring(0, 300) : detail));
                                             goto done;
                                         }
+                                        TimeSpan? retryAfter = resp?.Headers.RetryAfter?.Delta;
                                         resp?.Dispose();
                                         attempt++;
-                                        await Task.Delay(Math.Min(60000, 2000 * (1 << (attempt - 1)))).ConfigureAwait(false);
+                                        await Task.Delay(1000 * RetryDelaySeconds(attempt, maxDelaySeconds, retryAfter)).ConfigureAwait(false);
                                     }
                                 }
+                            again:;
                             }
                             r.Samples = samples;
                         done:;

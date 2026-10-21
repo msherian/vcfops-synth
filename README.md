@@ -6,7 +6,7 @@ Everything ships as one Docker image, published to `ghcr.io/msherian/vcfops-synt
 
 ## Status
 
-Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history, on top of the Phase 2 importer and the Phase 1 image, CLI, Suite API sign-in and CI. The commands below marked "to come" stop with exit code 3 and name the phase that builds them.
+Phases 0 to 4 are done: the image, CLI and Suite API sign-in, the RVTools and LiveOptics importer, seeding the estate into VCF Operations, and 30 days of backfilled history. Phase 5 (groups and tiered policies) is next. The commands below marked "to come" stop with exit code 3 and name the phase that builds them. Lab results and what they taught us are under [Results in the lab](#results-in-the-lab).
 
 | Command | What it does | Phase |
 |---|---|---|
@@ -16,7 +16,7 @@ Phase 4 of 9: seeding the estate into VCF Operations and backfilling its history
 | `plan` | Dry run: what each stage would do | 1 |
 | `import` | RVTools export to inventory model | 2 |
 | `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
-| `reset` | Remove the objects seed created | to come (3) |
+| `reset` | Remove what the toolset created, found by tag and identifier | to come (8) |
 | `backfill` | Push generated history for every numeric metric | 4 |
 | `content` | Groups, policies, alerts, dashboards | to come (5 to 7) |
 | `feed`, `scenario` | Live metrics and scenario overlays | to come (6) |
@@ -57,7 +57,7 @@ The FQDN in `lab.example.json` is a placeholder in Holodeck's `site-a.vcf.lab` d
 | `operations.username` / `authSource` | `admin` / `LOCAL` | Account used for the Suite API |
 | `operations.skipCertificateCheck` | `false` | Set `true` for Holodeck's self-signed certificates |
 | `adapterKind.key` | `VcfOpsSynth` | Push adapter kind the synthetic objects live under |
-| `prefix` | `Synth-` | Prefix on everything created, so reset can find it |
+| `prefix` | `Synth-` | Prefix on content the toolset creates (groups, policies, dashboards). Seeded objects keep their inventory names; they are found by tag and identifier |
 | `timeZone` | `Europe/Dublin` | IANA zone for business-hours patterns |
 | `intervalMinutes` | `5` | Sample interval for history and the live feed |
 | `backfillDays` | `30` | Days of history to push |
@@ -105,6 +105,7 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-Kinds` | `VCFOPS_SYNTH_KINDS` | backfill | Comma-separated resource kinds |
 | `-MaxVms` | `VCFOPS_SYNTH_MAX_VMS` | backfill | First n VMs only, for a pilot |
 | `-Concurrency` | `VCFOPS_SYNTH_CONCURRENCY` | backfill | Objects posted at once; default 4 |
+| `-MaxSamples` | `VCFOPS_SYNTH_MAX_SAMPLES` | backfill | Samples per post, halved when refused; default 100000 |
 | `-Restart` | `VCFOPS_SYNTH_RESTART` | backfill | Forget saved progress |
 | `-Fqdn` | `VCFOPS_FQDN` | config, connect-test, plan, seed, backfill | VCF Operations host name; default `operations.fqdn` |
 | `-Username` | `VCFOPS_USERNAME` | config, connect-test, plan, seed, backfill | Account; default `operations.username` |
@@ -123,7 +124,7 @@ docker run --rm -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD
 ```
 ## Seeding
 
-`seed -Adapter <holder adapter instance>` builds the inventory as VMWARE objects under that instance, foundations first: an optional Physical Data Center (`seed.physicalDatacenter`), datacenters (linked under the holder instance), clusters, datastores, hosts, distributed switches and port groups, VM folders and VMs. Standard switches and port groups, which VMWARE does not model, go under the `adapterKind.key` push kind. Every relationship is worked out before anything is created.
+`seed -Adapter <holder adapter instance>` builds the inventory as VMWARE objects under that instance, foundations first: an optional Physical Data Center (`seed.physicalDatacenter`), datacenters (linked under the holder instance), clusters, datastores, hosts, distributed switches and port groups, VM folders and VMs. Standard switches and port groups, which VMWARE does not model, go under the `adapterKind.key` push kind. Because the rest are native VMWARE objects, the stock vSphere content (dashboards, capacity, alerts) treats them like real ones. Every relationship is worked out before anything is created.
 
 Rubrics captured from real lab objects (`seed.rubrics`, default `<paths.data>/rubrics`) only say which metrics and properties each kind has. Every value comes from the inventory (RVTools, LiveOptics), is derived from it (for example host use over capacity, cluster roll-ups), or is a neutral placeholder (`-`, `0`, `false`). Keys Operations computes itself (capacity analytics such as time and capacity remaining, badges, alert counts, workload scores, reclamation, rightsizing, sustainability and capacity profiles) are never pushed, so its own results are not masked. Capacity inputs (usable memory, memory demand, total and HA CPU and memory capacity, disk space over the datastores a host or cluster sees) come from the inventory and stay flat through the backfill. Objects keep their inventory names (`seed.prefix` is optional) and carry two vSphere tags in `summary|tag`: `seed.tag` (default `vcfops-synth-synthetic`) and `Project-<project>`, where the project is `seed.project` or the `YYYY.#### ... OPP-n` folder the export was imported from.
 
@@ -135,7 +136,27 @@ Objects that already exist are found by their identifiers, not their names, and 
 
 `backfill` pushes `backfillDays` of history at `intervalMinutes` for every numeric metric of the seeded objects, with analytics processing off. Metrics LiveOptics measured (VM and host CPU, memory, IOPS, throughput, latency) match its average and peak exactly. The rest follow the object's workload curve around their current value, grow to it (space in use), stay flat (capacity, counts) or stay at zero (no source). Each VM's curve comes from its workload profile in `timeZone`, with seeded noise and incident windows; hosts, clusters, datastores, port groups and folders follow the sum of their VMs' curves, so peaks line up.
 
-Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. In the lab, 30 days for 1,709 objects is 2.4 billion samples, about 620,000 a second at concurrency 4, and about 6 bytes a sample in the Operations database.
+Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. Operations 9.1.1 in the lab refused posts of about 250,000 samples or more with HTTP 500, so posts hold at most `-MaxSamples` samples and a refused one is halved, for the rest of the batch too. For a busy Operations, each post is retried up to 10 times with waits growing from 2 seconds to 60, and objects still refused get two more passes at the end of the run, one at a time; any left after that are reported and picked up by the next run. Five minutes after the last post, the last point of each pushed object's first and last metric is read back: in the lab, Operations sometimes answered posts it then never stored, so such objects are reported as not stored and left for the next run. The summary also counts the objects that had a post refused. In the lab, 30 days for the 1,644 objects with numeric metrics is 224,943 series and 1.94 billion samples, about 550,000 to 590,000 a second at concurrency 4 to 6 (about an hour), and about 6 bytes a sample in the Operations database. Each progress line shows the time, the batch duration and the time left.
+
+After a backfill, run `seed -Refresh`: history is posted with analytics off, and Operations only calculates capacity (time and capacity remaining) once points arrive with analytics on. Until the live feed exists (Phase 6), those figures stay at the last refreshed point.
+
+Calibration follows LiveOptics's average and peak exactly, with two edge cases. Where the peak is no higher than the average, the series is flat at the average. Where the average is 0 but the peak is not (LiveOptics rounds small figures down), the series is zero apart from one spike at the object's busiest point, so its mean still rounds to 0. A VM's disk throughput also goes on its first disk, because Operations calculates a VM's total write throughput from its per-disk values and overwrites a pushed total.
+
+## Results in the lab
+
+| | |
+|---|---|
+| Seeded | 2,220 objects (11 kinds) and 6,788 relationships, matching the plan; parents survive a vCenter collection cycle |
+| Backfilled | 30 days at 5 minutes: 1,644 objects, 224,943 series, 1.94 billion samples, no failures |
+| LiveOptics check | 1,918 of 1,935 calibrated series (99%) match the LiveOptics average and peak, over 40 random VMs and all 89 hosts; every series has all 8,640 points, and all 44 per-kind samples pass |
+| Capacity | after `seed -Refresh`, Operations calculates time and capacity remaining itself (for example 366 days and 35.8 % on a 16-core host) |
+
+Findings that shaped the code:
+
+- **Never push keys Operations computes.** Capacity analytics (time and capacity remaining, recommended size), badges, alert counts, workload scores, reclamation, rightsizing, sustainability and capacity profiles come from Operations. Pushed as zero, they showed as 0 Days and 0 % remaining. The seed plan leaves them out.
+- **Capacity keys are sizes, not activity.** `cpu|totalCapacity_average` ends in `_average` but is a capacity, so it stays flat through history.
+- **Seeded objects are found by tag and identifier, not prefix.** They keep their inventory names and carry the `vcfops-synth` and project tags; their managed object IDs contain `-synth-`.
+- **Memory:** a full plan and spec takes about 500 MB in one PowerShell process. On an 8 GB host the backfill and the verification were killed for low memory; 32 GB runs the whole sequence comfortably. On a small host, use `-Concurrency 2`.
 
 ## Development
 
