@@ -31,15 +31,17 @@
                                          (VCFOPS_SYNTH_PERFORMANCE; default import.performance)
                           -NoAnonymise   keep real names; only for exports you may share as is
                                          (VCFOPS_SYNTH_NO_ANONYMISE; default: import.anonymise)
-        seed              Creates the inventory in VCF Operations under a vCenter adapter instance,
+        seed              Creates the inventory in VCF Operations under the holder adapter instance,
                           foundations first: an optional Physical Data Center (seed.physicalDatacenter),
                           datacenters, clusters, datastores, hosts, distributed and standard switches,
                           port groups, VM folders and VMs. Objects keep their inventory names and carry
                           the seed.tag and project vSphere tags; values come from the inventory only.
                           Standard switches and port groups go under the toolset's adapter kind.
-                          Every relationship is worked out first, datacenters go under the vCenter, and
-                          objects that already exist (by identifier) are skipped.
-                          -Adapter       vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          Every relationship is worked out first, datacenters go under the holder adapter
+                          instance, and objects that already exist (by identifier) are skipped. The holder
+                          is a VMWARE instance of its own, created if missing and never started: a vCenter
+                          adapter marks objects its vCenter lacks as not existing when it restarts.
+                          -Adapter       holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
                           -Refresh       also push planned properties and current stats to objects already there
                                          (VCFOPS_SYNTH_REFRESH)
                           -DryRun        build and summarise the plan; create nothing (VCFOPS_SYNTH_DRY_RUN)
@@ -48,12 +50,13 @@
                           their average and peak; the rest follow each object's workload curve around its
                           current value, grow (space in use), stay flat (capacity) or stay at zero. A host,
                           cluster or datastore follows the sum of its VMs' curves. Resumes from paths.state.
-                          -Adapter       vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          -Adapter       holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
                           -Days          days of history (VCFOPS_SYNTH_DAYS; default backfillDays)
                           -Kinds         only these kinds, comma-separated: VirtualMachine,HostSystem,...
                                          (VCFOPS_SYNTH_KINDS)
                           -MaxVms        only the first n VMs by key, for a pilot (VCFOPS_SYNTH_MAX_VMS)
                           -Concurrency   objects posted at once (VCFOPS_SYNTH_CONCURRENCY; default 4)
+                          -MaxSamples    samples per post, halved when refused (VCFOPS_SYNTH_MAX_SAMPLES; default 100000)
                           -Restart       forget saved progress and start over on a new range (VCFOPS_SYNTH_RESTART)
                           -DryRun        count objects, series and samples; push nothing (VCFOPS_SYNTH_DRY_RUN)
 
@@ -102,7 +105,7 @@
                           capacity, symptoms and alerts run on it. Each series carries on from the backfill at the
                           same levels; a gap since the last push (or the backfill's end) is filled first, with
                           analytics off, up to 24 hours. Running scenarios are read every cycle. Runs until stopped.
-                          -Adapter       vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          -Adapter       holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
                           -Cycles        stop after n cycles, e.g. 1 from a scheduled task (VCFOPS_SYNTH_CYCLES)
                           -Concurrency   objects posted at once (VCFOPS_SYNTH_CONCURRENCY; default 8)
                           -DryRun        prepare the feed and show the next point; push nothing (VCFOPS_SYNTH_DRY_RUN)
@@ -114,7 +117,7 @@
                           -Target        object to run it on, by inventory ID or name; default a busy one
                                          (VCFOPS_SYNTH_TARGET)
                           -RampMinutes   minutes to full effect (VCFOPS_SYNTH_RAMP_MINUTES; default 10)
-                          -Adapter       vCenter adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          -Adapter       holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
 
         reset             Deletes the objects seed created, VMs first, found by kind and unique identifier and
                           deleted only when they carry the synthetic tag (seed.tag); then forgets the backfill,
@@ -151,7 +154,7 @@
     import: keep real names. VCFOPS_SYNTH_NO_ANONYMISE.
 
 .PARAMETER Adapter
-    seed, backfill: the vCenter adapter instance. VCFOPS_SYNTH_ADAPTER.
+    seed, backfill, feed, scenario: the holder adapter instance. VCFOPS_SYNTH_ADAPTER.
 
 .PARAMETER Refresh
     seed: push planned properties and stats to objects already there. VCFOPS_SYNTH_REFRESH.
@@ -180,6 +183,9 @@
 
 .PARAMETER Concurrency
     backfill: objects posted at once. VCFOPS_SYNTH_CONCURRENCY.
+
+.PARAMETER MaxSamples
+    backfill: samples per post; a post Operations refuses with HTTP 500 is halved. VCFOPS_SYNTH_MAX_SAMPLES.
 
 .PARAMETER Restart
     backfill: forget saved progress. VCFOPS_SYNTH_RESTART.
@@ -277,6 +283,7 @@ param(
     [string[]]$Kinds,
     [string]$MaxVms,
     [string]$Concurrency,
+    [string]$MaxSamples,
     [switch]$Restart,
     [string]$Cycles,
     [string]$Start,
@@ -326,6 +333,7 @@ $optionSpec = [ordered]@{
     Kinds       = @{ Env = 'VCFOPS_SYNTH_KINDS'; Type = 'list'; Commands = @('backfill') }
     MaxVms      = @{ Env = 'VCFOPS_SYNTH_MAX_VMS'; Type = 'count'; Commands = @('backfill') }
     Concurrency = @{ Env = 'VCFOPS_SYNTH_CONCURRENCY'; Type = 'count'; Commands = @('backfill', 'feed') }
+    MaxSamples  = @{ Env = 'VCFOPS_SYNTH_MAX_SAMPLES'; Type = 'count'; Commands = @('backfill') }
     Restart     = @{ Env = 'VCFOPS_SYNTH_RESTART'; Type = 'switch'; Commands = @('backfill') }
     Cycles      = @{ Env = 'VCFOPS_SYNTH_CYCLES'; Type = 'count'; Commands = @('feed') }
     Start       = @{ Env = 'VCFOPS_SYNTH_START'; Type = 'text'; Commands = @('scenario') }
@@ -462,7 +470,7 @@ function Get-CliSeededPlan {
     # Signs in, then the seed plan and the Operations ID of each planned object, for feed and scenario.
     param($Config, $Inventory, [switch]$NoIds)
     $adapterName = if ($options.Adapter) { $options.Adapter } else { $Config.seed.adapterInstance }
-    if (-not $adapterName) { throw 'No vCenter adapter instance. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
+    if (-not $adapterName) { throw 'No adapter instance. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
     $rubricPath = if ($Config.seed.rubrics) { $Config.seed.rubrics } else { Join-Path $Config.paths.data 'rubrics' }
     $rubrics = Get-SynthRubric -Path $rubricPath
     $null = Connect-Cli -Config $Config
@@ -661,14 +669,16 @@ try {
         'seed' {
             $config = Get-CliConfig
             $adapterName = if ($options.Adapter) { $options.Adapter } else { $config.seed.adapterInstance }
-            if (-not $adapterName) { throw 'No vCenter adapter instance to seed under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
+            if (-not $adapterName) { throw 'No adapter instance to seed under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
             $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
             $inventory = Get-SynthInventory -Path $config.paths.inventory
             $rubrics = Get-SynthRubric -Path $rubricPath
 
             $null = Connect-Cli -Config $config
             try {
-                $seedTarget = Resolve-SynthSeedTarget -Name $adapterName
+                $seedTarget = Resolve-SynthSeedTarget -Name $adapterName -Create:(-not $options.DryRun)
+                if ($seedTarget.Created) { Write-Host "Created holder adapter instance '$adapterName'. Do not start it." }
+                if ($seedTarget.Collecting) { Write-Host "Warning: '$adapterName' collects from a vCenter. When it restarts it marks every seeded object its vCenter lacks as not existing, and groups and policies leave them out. Seed under a holder instance instead (seed.adapterInstance)." }
                 $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $seedTarget
                 $plan = $built.Plan
                 Write-Host "Tags: $(($built.Tags | ForEach-Object { "$($_.Category): $($_.Name)" }) -join '; ')"
@@ -703,7 +713,7 @@ try {
         'backfill' {
             $config = Get-CliConfig
             $adapterName = if ($options.Adapter) { $options.Adapter } else { $config.seed.adapterInstance }
-            if (-not $adapterName) { throw 'No vCenter adapter instance to backfill under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
+            if (-not $adapterName) { throw 'No adapter instance to backfill under. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
             $rubricPath = if ($config.seed.rubrics) { $config.seed.rubrics } else { Join-Path $config.paths.data 'rubrics' }
             $inventory = Get-SynthInventory -Path $config.paths.inventory
             $rubrics = Get-SynthRubric -Path $rubricPath
@@ -744,8 +754,8 @@ try {
                     $state = Get-Content -LiteralPath $config.paths.state -Raw | ConvertFrom-Json -AsHashtable
                     if ($state -and $state.ContainsKey('backfill')) { $state.Remove('backfill'); $state | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $config.paths.state -Encoding utf8 }
                 }
-                $result = Invoke-SynthBackfill -Spec $spec -Range $range -StatePath $config.paths.state -TimeZone $config.timeZone -Concurrency $(if ($options.Concurrency) { $options.Concurrency } else { 4 }) -Verbose
-                Write-Host ('  {0} objects pushed, {1:N0} samples in {2:N0} calls, {3} s ({4:N0} samples/s); {5} already done' -f $result.objects, $result.samples, $result.calls, $result.seconds, $(if ($result.seconds) { $result.samples / $result.seconds } else { 0 }), $result.skipped)
+                $result = Invoke-SynthBackfill -Spec $spec -Range $range -StatePath $config.paths.state -TimeZone $config.timeZone -Concurrency $(if ($options.Concurrency) { $options.Concurrency } else { 4 }) -MaxSamplesPerCall $(if ($options.MaxSamples) { $options.MaxSamples } else { 100000 }) -Verbose
+                Write-Host ('  {0} objects pushed, {1:N0} samples in {2:N0} calls, {3} s ({4:N0} samples/s); {5} already done; {6} posts halved after a refusal; {7} objects had a post refused; {8} answered but not stored' -f $result.objects, $result.samples, $result.calls, $result.seconds, $(if ($result.seconds) { $result.samples / $result.seconds } else { 0 }), $result.skipped, $result.splits, $result.refused.Count, $result.unstored)
                 foreach ($failure in $result.failed) { Write-Host "Failed: $failure" }
             }
             finally {
