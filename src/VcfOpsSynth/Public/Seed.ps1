@@ -459,33 +459,52 @@ function Invoke-SynthSeed {
 function Resolve-SynthSeedTarget {
     <#
     .SYNOPSIS
-        Finds the vCenter adapter instance by name and the VMEntityVCID its objects carry.
+        Finds the VMWARE adapter instance the synthetic estate goes under, and the VMEntityVCID its objects carry.
+
+    .DESCRIPTION
+        The estate belongs under a holder instance of its own that is never started. A vCenter adapter that
+        collects marks every object it does not find in its vCenter as not existing when it restarts, and
+        groups and policies then leave those objects out. With -Create, a missing instance is made as a
+        holder (New-SynthHolderAdapter). Collecting is true when the instance collects from a vCenter.
 
     .PARAMETER Name
-        The adapter instance name, for example vc-mgmt-a.
+        The adapter instance name, for example 'vcfops-synth holder - do not start'.
+
+    .PARAMETER Create
+        Make the instance as a holder when there is none of that name.
 
     .EXAMPLE
-        $target = Resolve-SynthSeedTarget -Name 'vc-mgmt-a'
+        $target = Resolve-SynthSeedTarget -Name 'vcfops-synth holder - do not start' -Create
     #>
     [CmdletBinding()]
     [OutputType([hashtable])]
-    param([Parameter(Mandatory)][string]$Name)
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [switch]$Create
+    )
 
     $instances = @((Invoke-SynthOpsRequest -Method Get -Path 'adapters' -Query @{ adapterKindKey = 'VMWARE' }).adapterInstancesInfoDto)
     $instance = @($instances | Where-Object { $_.resourceKey.name -eq $Name -or $_.resourceKey.name -like "$Name.*" })
-    if ($instance.Count -ne 1) {
-        throw "Found $($instance.Count) VMWARE adapter instances named '$Name'; there are: $(($instances | ForEach-Object { $_.resourceKey.name }) -join ', ')."
+    $created = $false
+    if (-not $instance.Count -and $Create) {
+        $instance = @(New-SynthHolderAdapter -Name $Name)
+        $created = $true
     }
+    $others = ($instances | ForEach-Object { $_.resourceKey.name }) -join ', '
+    if (-not $instance.Count) { throw "No VMWARE adapter instance named '$Name'; seed creates it as a holder. There are: $others." }
+    if ($instance.Count -ne 1) { throw "Found $($instance.Count) VMWARE adapter instances named '$Name'; there are: $others." }
     $adapterId = $instance[0].id
-    # Read the vCenter UUID from a real datacenter under the instance, as the vCenter adapter writes it.
-    $datacenters = @((Invoke-SynthOpsRequest -Method Get -Path 'resources' -Query @{ adapterKind = 'VMWARE'; resourceKind = 'Datacenter'; adapterInstanceId = $adapterId; pageSize = 50 }).resourceList)
-    $vcId = $null
-    foreach ($dc in $datacenters) {
-        $id = @($dc.resourceKey.resourceIdentifiers | Where-Object { $_.identifierType.name -eq 'VMEntityVCID' })
-        if ($id.Count -and $id[0].value) { $vcId = $id[0].value; break }
+    $vcId = $instance[0].resourceKey.resourceIdentifiers | Where-Object { $_.identifierType.name -eq 'VMEntityVCID' -and $_.value } | Select-Object -First 1 -ExpandProperty value
+    if (-not $vcId) {
+        # Older instances may not carry it; read it from a datacenter under the instance, as the vCenter adapter writes it.
+        $datacenters = @((Invoke-SynthOpsRequest -Method Get -Path 'resources' -Query @{ adapterKind = 'VMWARE'; resourceKind = 'Datacenter'; adapterInstanceId = $adapterId; pageSize = 50 }).resourceList)
+        foreach ($dc in $datacenters) {
+            $id = @($dc.resourceKey.resourceIdentifiers | Where-Object { $_.identifierType.name -eq 'VMEntityVCID' })
+            if ($id.Count -and $id[0].value) { $vcId = $id[0].value; break }
+        }
     }
-    if (-not $vcId) { throw "Adapter instance '$Name' has no datacenter to read its vCenter UUID from." }
-    @{ AdapterInstanceId = $adapterId; VcId = $vcId }
+    if (-not $vcId) { throw "Adapter instance '$Name' has no VMEntityVCID, on itself or on a datacenter under it." }
+    @{ AdapterInstanceId = $adapterId; VcId = $vcId; Created = $created; Collecting = [bool]$instance[0].PSObject.Properties['lastCollected'] }
 }
 
 function Get-SynthSeedKind {

@@ -630,3 +630,83 @@ Describe 'Invoke-SynthSeed' {
         $result.ids.Keys | Should -Not -Contain 'vm-3333000001'
     }
 }
+
+Describe 'Resolve-SynthSeedTarget' {
+    BeforeAll {
+        # An adapter instance as GET /api/adapters lists it; a collecting one has lastCollected.
+        function New-TestInstance {
+            param([string]$Id, [string]$Name, [string]$VcId, [switch]$Collecting)
+            $identifiers = if ($VcId) { @([pscustomobject]@{ identifierType = [pscustomobject]@{ name = 'VMEntityVCID' }; value = $VcId }) } else { @() }
+            $instance = [pscustomobject]@{ id = $Id; resourceKey = [pscustomobject]@{ name = $Name; resourceIdentifiers = $identifiers } }
+            if ($Collecting) { $instance | Add-Member lastCollected 1792507232330 }
+            $instance
+        }
+    }
+
+    BeforeEach {
+        $script:calls = [System.Collections.Generic.List[object]]::new()
+        $script:instances = @(New-TestInstance 'vc-1' 'vc-mgmt-a.site-a.example.test' 'vc-uuid-real' -Collecting)
+        Mock -ModuleName VcfOpsSynth Invoke-SynthOpsRequest {
+            $script:calls.Add(@{ Method = $Method; Path = $Path; Body = $Body })
+            switch -Wildcard ("$Method $Path") {
+                'Get adapters' { [pscustomobject]@{ adapterInstancesInfoDto = $script:instances } }
+                'Get credentials' { [pscustomobject]@{ credentialInstances = @([pscustomobject]@{ id = 'cred-old'; name = 'holder' }, [pscustomobject]@{ id = 'cred-vc'; name = 'vc' }) } }
+                'Get credentials/cred-old/adapters' { [pscustomobject]@{} }
+                'Post adapters' { [pscustomobject]@{ id = 'holder-1' } }
+                'Get adapters/holder-1' { New-TestInstance 'holder-1' 'holder' $Body.resourceIdentifiers }
+                'Get resources' { [pscustomobject]@{ resourceList = @(@{ resourceKey = @{ resourceIdentifiers = @(@{ identifierType = @{ name = 'VMEntityVCID' }; value = 'vc-uuid-dc' }) } }) } }
+            }
+        }
+        # The created instance reads back with the VCID that was posted.
+        Mock -ModuleName VcfOpsSynth Invoke-SynthOpsRequest {
+            $script:calls.Add(@{ Method = $Method; Path = $Path })
+            $posted = @($script:calls | Where-Object { $_.Method -eq 'Post' -and $_.Path -eq 'adapters' })[0].Body
+            New-TestInstance 'holder-1' $posted.name (@($posted.resourceIdentifiers | Where-Object name -eq 'VMEntityVCID')[0].value)
+        } -ParameterFilter { $Method -eq 'Get' -and $Path -eq 'adapters/holder-1' }
+    }
+
+    It 'reads the VCID from the instance itself and says a vCenter instance collects' {
+        $target = Resolve-SynthSeedTarget -Name 'vc-mgmt-a'
+
+        $target.AdapterInstanceId | Should -Be 'vc-1'
+        $target.VcId | Should -Be 'vc-uuid-real'
+        $target.Collecting | Should -BeTrue
+        $target.Created | Should -BeFalse
+        @($script:calls | Where-Object Path -eq 'resources').Count | Should -Be 0
+    }
+
+    It 'falls back to a datacenter for the VCID' {
+        $script:instances = @(New-TestInstance 'vc-1' 'vc-mgmt-a' $null -Collecting)
+
+        (Resolve-SynthSeedTarget -Name 'vc-mgmt-a').VcId | Should -Be 'vc-uuid-dc'
+    }
+
+    It 'throws when the instance is missing and -Create is not given, and creates nothing' {
+        { Resolve-SynthSeedTarget -Name 'holder' } | Should -Throw "*No VMWARE adapter instance named 'holder'*seed creates it*"
+        @($script:calls | Where-Object Method -ne 'Get').Count | Should -Be 0
+    }
+
+    It 'creates a never-started holder with its own VCID and an unresolvable address' {
+        $target = Resolve-SynthSeedTarget -Name 'holder' -Create
+
+        $target.Created | Should -BeTrue
+        $target.Collecting | Should -BeFalse
+        $target.AdapterInstanceId | Should -Be 'holder-1'
+        $body = @($script:calls | Where-Object { $_.Method -eq 'Post' -and $_.Path -eq 'adapters' })[0].Body
+        $ids = @{}; foreach ($i in $body.resourceIdentifiers) { $ids[$i.name] = $i.value }
+        $ids.VCURL | Should -Be "$($ids.VMEntityVCID).synth.invalid"
+        $ids.AUTODISCOVERY | Should -Be 'false'
+        $ids.VMEntityVCID | Should -Not -Be 'vc-uuid-real'
+        $target.VcId | Should -Be $ids.VMEntityVCID
+        $body.description | Should -BeLike '*Do not start*'
+        # Nothing starts the instance.
+        @($script:calls | Where-Object { $_.Path -like '*monitoringstate*' }).Count | Should -Be 0
+    }
+
+    It 'removes an unused credential of the same name left by an earlier instance, and only that one' {
+        $null = Resolve-SynthSeedTarget -Name 'holder' -Create
+
+        $deleted = @($script:calls | Where-Object Method -eq 'Delete' | ForEach-Object Path)
+        $deleted | Should -Be @('credentials/cred-old')
+    }
+}

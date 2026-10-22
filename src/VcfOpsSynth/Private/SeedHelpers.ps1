@@ -731,3 +731,48 @@ function Get-SynthExistingResource {
     }
     $found
 }
+
+function New-SynthHolderAdapter {
+    <#
+    .SYNOPSIS
+        Creates a VMWARE adapter instance that only holds the synthetic estate, and never starts it.
+
+    .DESCRIPTION
+        The instance gets a vCenter address that cannot resolve (<vcid>.synth.invalid), a VMEntityVCID of its
+        own, autodiscovery off and a placeholder credential, so it never reaches a vCenter. Starting it
+        would make it reconcile against that address and mark every seeded object not existing; the name
+        and description say so. A credential of the same name left by an earlier, deleted instance (Operations
+        keeps it) is removed first when no instance uses it. Returns the instance as Operations lists it.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][string]$Name)
+
+    if (-not $PSCmdlet.ShouldProcess($Name, 'Create a holder adapter instance')) { return }
+    foreach ($old in @((Invoke-SynthOpsRequest -Method Get -Path 'credentials').credentialInstances | Where-Object { $_.name -eq $Name })) {
+        $users = Invoke-SynthOpsRequest -Method Get -Path "credentials/$($old.id)/adapters"
+        if (-not ($users -and $users.PSObject.Properties['adapterInstancesInfoDto'] -and @($users.adapterInstancesInfoDto).Count)) {
+            $null = Invoke-SynthOpsRequest -Method Delete -Path "credentials/$($old.id)"
+        }
+    }
+    # The address names the instance too, so a second holder needs an address of its own.
+    $vcId = [guid]::NewGuid().ToString()
+    $body = @{
+        name                = $Name
+        description         = 'vcfops-synth: holds the synthetic estate only. Do not start it: it would mark every object under it not existing.'
+        adapterKindKey      = 'VMWARE'
+        resourceIdentifiers = @(
+            @{ name = 'VCURL'; value = "$vcId.synth.invalid" }
+            @{ name = 'VMEntityVCID'; value = $vcId }
+            @{ name = 'AUTODISCOVERY'; value = 'false' }
+            @{ name = 'PROCESSCHANGEEVENTS'; value = 'false' }
+        )
+        # Never used to sign in anywhere: the address does not resolve and the instance is not started.
+        credential          = @{
+            name = $Name; adapterKindKey = 'VMWARE'; credentialKindKey = 'PRINCIPALCREDENTIAL'
+            fields = @(@{ name = 'USER'; value = 'vcfops-synth' }, @{ name = 'PASSWORD'; value = [guid]::NewGuid().ToString() })
+        }
+    }
+    $created = Invoke-SynthOpsRequest -Method Post -Path 'adapters' -Body $body
+    Invoke-SynthOpsRequest -Method Get -Path "adapters/$($created.id)"
+}
