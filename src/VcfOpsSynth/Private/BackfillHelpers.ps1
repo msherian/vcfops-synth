@@ -39,12 +39,12 @@ function Get-SynthCalibration {
             if ($capMhz) { & $pair @('cpu|usagemhz_average', 'cpu|demandmhz') (& $get 'cpuAvgPct') (& $get 'cpuPeakPct') ($capMhz / 100) $nan }
             & $pair @('mem|usage_average') (& $get 'memAvgPct') (& $get 'memPeakPct') 1 100
             if ($memKb) { & $pair @('mem|active_average', 'mem|host_demand', 'mem|guest_demand', 'mem|vmMemoryDemand') (& $get 'memAvgPct') (& $get 'memPeakPct') ($memKb / 100) $nan }
-            & $pair @('virtualDisk|numberReadAveraged_average') (& $get 'readIopsAvg') (& $get 'readIopsPeak') 1 $nan
-            & $pair @('virtualDisk|numberWriteAveraged_average') (& $get 'writeIopsAvg') (& $get 'writeIopsPeak') 1 $nan
+            & $pair @('virtualDisk:Aggregate of all instances|numberReadAveraged_average') (& $get 'readIopsAvg') (& $get 'readIopsPeak') 1 $nan
+            & $pair @('virtualDisk:Aggregate of all instances|numberWriteAveraged_average') (& $get 'writeIopsAvg') (& $get 'writeIopsPeak') 1 $nan
             & $pair @('virtualDisk|read_average') (& $get 'readMBpsAvg') (& $get 'readMBpsPeak') 1024 $nan
             & $pair @('virtualDisk|write_average') (& $get 'writeMBpsAvg') (& $get 'writeMBpsPeak') 1024 $nan
-            & $pair @('virtualDisk|totalReadLatency_average', 'storage|totalReadLatency_average') (& $get 'readLatencyAvgMs') (& $get 'readLatencyPeakMs') 1 $nan
-            & $pair @('virtualDisk|totalWriteLatency_average', 'storage|totalWriteLatency_average') (& $get 'writeLatencyAvgMs') (& $get 'writeLatencyPeakMs') 1 $nan
+            & $pair @('virtualDisk:Aggregate of all instances|totalReadLatency_average', 'storage|totalReadLatency_average') (& $get 'readLatencyAvgMs') (& $get 'readLatencyPeakMs') 1 $nan
+            & $pair @('virtualDisk:Aggregate of all instances|totalWriteLatency_average', 'storage|totalWriteLatency_average') (& $get 'writeLatencyAvgMs') (& $get 'writeLatencyPeakMs') 1 $nan
         }
         'HostSystem' {
             $capMhz = [double]$(if ($Item.cores) { $Item.cores } else { 0 }) * [double]$(if ($Item.cpuMhz) { $Item.cpuMhz } else { 0 })
