@@ -419,6 +419,45 @@ Describe 'New-SynthSeedPlan' {
     }
 }
 
+Describe 'Seed plan capacity inputs' {
+    BeforeAll {
+        $script:capRubric = New-TestRubricSet
+        $script:capRubric.HostSystem = New-TestRubric 'HostSystem' @{
+            'cpu|demandmhz' = 1; 'mem|host_usable' = 1; 'diskspace|total_capacity' = 1
+            'OnlineCapacityAnalytics|timeRemaining' = 9; 'OnlineCapacityAnalytics|mem|demand|capacityRemaining' = 9
+            'badge|health' = 9; 'System Attributes|total_alert_count' = 9; 'cpu|demand|workload' = 9; 'reclaimable|vm_count' = 9
+        }
+        $script:capRubric.ClusterComputeResource = New-TestRubric 'ClusterComputeResource' @{ 'diskspace|total_capacity' = 1; 'diskspace|total_provisioned' = 1; 'cpu|demand|usableCapacity' = 9 }
+        $inventory = New-TestInventory
+        # A second host in the cluster; one datastore both hosts see, and one only the second host sees.
+        $second = @{ id = 'esx-cccc000002'; name = 'esx-cccc000002'; datacenter = 'dc-aaaa000001'; cluster = 'cluster-bbbb000001'; cpuMhz = 2000; cores = 8; memoryMiB = 2048; baseline = @{ cpuUsagePct = 10; memUsagePct = 20 }; nics = @(); hbas = @(); vmkernels = @() }
+        Complete-TestRecord $second 'hosts'
+        $inventory.hosts = @($inventory.hosts) + @($second)
+        $inventory.datastores[0].hosts = @('esx-cccc000001', 'esx-cccc000002')
+        $own = @{ id = 'ds-eeee000002'; name = 'ds-eeee000002'; type = 'VMFS'; capacityMiB = 1024; inUseMiB = 512; provisionedMiB = 1536; hosts = @('esx-cccc000002') }
+        Complete-TestRecord $own 'datastores'
+        $inventory.datastores = @($inventory.datastores) + @($own)
+        $script:capPlan = New-SynthSeedPlan -Inventory $inventory -Rubric $script:capRubric -VcId 'vc-uuid-0001'
+    }
+
+    It 'leaves out every key Operations computes, and keeps the inputs it computes from' {
+        $esx = Get-PlanObject $script:capPlan 'esx-cccc000001'
+        $keys = @($esx.stats | ForEach-Object key)
+        foreach ($k in 'OnlineCapacityAnalytics|timeRemaining', 'OnlineCapacityAnalytics|mem|demand|capacityRemaining', 'badge|health', 'System Attributes|total_alert_count', 'cpu|demand|workload', 'reclaimable|vm_count') { $keys | Should -Not -Contain $k -Because $k }
+        foreach ($k in 'cpu|demandmhz', 'mem|host_usable', 'diskspace|total_capacity') { $keys | Should -Contain $k -Because $k }
+        @((Get-PlanObject $script:capPlan 'cluster-bbbb000001').stats | ForEach-Object key) | Should -Not -Contain 'cpu|demand|usableCapacity'
+    }
+
+    It 'counts each datastore once in a cluster''s disk space, however many of its hosts see it' {
+        $cluster = Get-PlanObject $script:capPlan 'cluster-bbbb000001'
+        Get-Entry $cluster.stats 'diskspace|total_capacity' | Should -Be 3
+        Get-Entry $cluster.stats 'diskspace|total_provisioned' | Should -Be 4.5
+        # Each host counts the datastores it sees, shared ones included.
+        Get-Entry (Get-PlanObject $script:capPlan 'esx-cccc000002').stats 'diskspace|total_capacity' | Should -Be 3
+        Get-Entry (Get-PlanObject $script:capPlan 'esx-cccc000001').stats 'diskspace|total_capacity' | Should -Be 2
+        Get-Entry (Get-PlanObject $script:capPlan 'esx-cccc000001').stats 'mem|host_usable' | Should -Be 1048576
+    }
+}
 Describe 'Get-SynthPlaceholder' {
     It 'reads only the type of the rubric value' {
         InModuleScope VcfOpsSynth {
