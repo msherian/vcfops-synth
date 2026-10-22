@@ -837,6 +837,10 @@ function Import-SynthRvtools {
             hostsMatched   = @($hosts.Values | Where-Object { $_.baseline.perf }).Count
             hostsWithout   = @($hosts.Values | Where-Object { -not $_.baseline.perf }).Count
             hostRowsUnused = $Performance.Hosts.Count - $perfHostsUsed.Count
+            latencyDropped = [int]$Performance.LatencyDropped
+        }
+        if ($perfReport.latencyDropped -gt 0) {
+            $report.warnings.Add("LiveOptics has $($perfReport.latencyDropped) latency figure(s) over 10,000 ms; they were read as missing.")
         }
         if ($perfReport.vmRowsUnused -gt 0) {
             $report.warnings.Add("LiveOptics has $($perfReport.vmRowsUnused) VM row(s) that match no VM in the RVTools export; they were ignored.")
