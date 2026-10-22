@@ -124,6 +124,25 @@ Describe 'Get-SynthContentName' {
     }
 }
 
+Describe 'Save-SynthContentDeletePayload' {
+    It 'writes the prefix and every name for ops-content-delete.py' {
+        $path = Join-Path $TestDrive 'content-delete.json'
+        Save-SynthContentDeletePayload -Prefix 'Synth-' -Path $path | Should -Be $path
+        $payload = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $names = Get-SynthContentName -Prefix 'Synth-'
+        $payload.prefix | Should -Be 'Synth-'
+        $payload.view | Should -Be $names.View
+        $payload.report | Should -Be $names.Report
+        $payload.dashboard | Should -Be $names.Dashboard
+    }
+
+    It 'writes nothing with -WhatIf' {
+        $path = Join-Path $TestDrive 'whatif.json'
+        $null = Save-SynthContentDeletePayload -Prefix 'Synth-' -Path $path -WhatIf
+        Test-Path -LiteralPath $path | Should -BeFalse
+    }
+}
+
 Describe 'Remove-SynthApplianceContent' {
     BeforeEach {
         $script:ssh = [System.Collections.Generic.List[object]]::new()

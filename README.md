@@ -256,7 +256,14 @@ Each widget shows its view on the `Synth-Estate` group, so it lists the seeded o
 
 `reset` removes what seed created. It finds each planned object by kind and unique identifier, as seed does, never by name, and deletes it only when its `summary|tag` carries the synthetic tag (`seed.tag`, `vcfops-synth-synthetic` by default); an object with a matching identifier but no tag is listed by ID and left alone. VMs go first and the Physical Datacenter last. Afterwards it forgets the backfill progress, the feed's last push and the running scenarios, so a reseed starts clean.
 
-Without `-Force` it only reports what it would delete. `-IncludeContent` also deletes the policies (the tier policies before `Synth-Base`), alerts, symptoms, recommendations, super metrics and custom groups whose names start with the content prefix, `Synth-Estate` included. Views, reports and dashboards cannot be deleted through the API. Add `-ApplianceSsh root@<ops appliance>` and reset signs in to the appliance with an SSH key (never a password) and deletes each of them with `ops-cli`, by the exact names `content` gives them: dashboards for all users, and never ops-cli's `-all`, which would delete the built-in ones too. Without `-ApplianceSsh`, reset lists them to delete in the UI. An item already gone shows as `not there`.
+Without `-Force` it only reports what it would delete. `-IncludeContent` also deletes the policies (the tier policies before `Synth-Base`), alerts, symptoms, recommendations, super metrics and custom groups whose names start with the content prefix, `Synth-Estate` included. Views, reports and dashboards cannot be deleted through the API. Add `-ApplianceSsh root@<ops appliance>` and reset signs in to the appliance with an SSH key (never a password) and deletes each of them with `ops-cli`, by the exact names `content` gives them: dashboards for all users, and never ops-cli's `-all`, which would delete the built-in ones too. Without `-ApplianceSsh`, reset lists them to delete in the UI and writes their names to `<paths.data>/content-delete.json`. Where the toolset cannot reach the appliance over SSH, copy that file and `bin/ops-content-delete.py` to the appliance and run the script there as root: it makes the same ops-cli calls with the same guards, reports only until given `--apply`, and exits 1 if an item failed. An item already gone shows as `not there`.
+
+```bash
+scp data/content-delete.json bin/ops-content-delete.py root@<ops appliance>:/tmp/
+ssh root@<ops appliance>
+$VMWARE_PYTHON_BIN /tmp/ops-content-delete.py /tmp/content-delete.json           # report only
+$VMWARE_PYTHON_BIN /tmp/ops-content-delete.py /tmp/content-delete.json --apply   # delete
+```
 
 ```bash
 pwsh ./bin/vcfops-synth.ps1 reset -ConfigPath ./config/lab.json                    # report only

@@ -196,6 +196,36 @@ function Get-SynthContentName {
     }
 }
 
+function Save-SynthContentDeletePayload {
+    <#
+    .SYNOPSIS
+        Writes the names of the toolset's views, reports and dashboards to a JSON file for bin/ops-content-delete.py.
+
+    .DESCRIPTION
+        For when reset cannot reach the appliance over SSH: copy the file and the
+        script to the appliance and run the script there; it deletes each name
+        with ops-cli. The names come from Get-SynthContentName.
+
+    .PARAMETER Prefix
+        The content prefix (lab.json prefix). It must not be empty.
+
+    .PARAMETER Path
+        The JSON file to write.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Prefix,
+        [Parameter(Mandatory)][string]$Path
+    )
+    $names = Get-SynthContentName -Prefix $Prefix
+    $payload = [ordered]@{ prefix = $Prefix; view = @($names.View); report = @($names.Report); dashboard = @($names.Dashboard) }
+    if ($PSCmdlet.ShouldProcess($Path, 'Write content delete payload')) {
+        $payload | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
+    }
+    $Path
+}
+
 function Invoke-SynthSsh {
     <#
     .SYNOPSIS

@@ -128,6 +128,7 @@
                                           super metrics and custom groups (VCFOPS_SYNTH_INCLUDE_CONTENT); with
                                           -ApplianceSsh also the views, reports and dashboards, by exact name with
                                           ops-cli on the appliance; without it, lists them to delete in the UI
+                                          and writes <data>/content-delete.json for bin/ops-content-delete.py
                           -ApplianceSsh   user@host of the Operations appliance, key sign-in only
                                           (VCFOPS_SYNTH_APPLIANCE_SSH)
                           -SshKey         private key for -ApplianceSsh (VCFOPS_SYNTH_SSH_KEY; default ssh's own)
@@ -895,8 +896,10 @@ try {
                     }
                     else {
                         $names = Get-SynthContentName -Prefix $config.prefix
+                        $payload = Save-SynthContentDeletePayload -Prefix $config.prefix -Path (Join-Path $config.paths.data 'content-delete.json') -Confirm:$false
                         Write-Host '  Views, reports and dashboards cannot be deleted through the API. Add -ApplianceSsh to delete them with ops-cli, or delete these in the UI:'
                         foreach ($kind in 'View', 'Report', 'Dashboard') { foreach ($n in $names.$kind) { Write-Host ('    {0,-14} {1}' -f $kind.ToLowerInvariant(), $n) } }
+                        Write-Host "  Or copy $payload and bin/ops-content-delete.py to the appliance and run there: `$VMWARE_PYTHON_BIN ops-content-delete.py content-delete.json --apply"
                     }
                 }
                 if ($report) { Write-Host 'Report only: nothing was deleted. Add -Force to delete.' }

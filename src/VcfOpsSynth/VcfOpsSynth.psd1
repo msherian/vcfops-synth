@@ -52,6 +52,7 @@
         'Remove-SynthSeededObject'
         'Remove-SynthContent'
         'Get-SynthContentName'
+        'Save-SynthContentDeletePayload'
         'Remove-SynthApplianceContent'
         'Clear-SynthState'
         'Get-SynthContentId'
