@@ -31,7 +31,7 @@
                                          (VCFOPS_SYNTH_PERFORMANCE; default import.performance)
                           -NoAnonymise   keep real names; only for exports you may share as is
                                          (VCFOPS_SYNTH_NO_ANONYMISE; default: import.anonymise)
-        seed              Creates the inventory in VCF Operations under a vCenter adapter instance,
+        seed              Creates the inventory in VCF Operations under the holder adapter instance,
                           foundations first: an optional Physical Data Center (seed.physicalDatacenter),
                           datacenters, clusters, datastores, hosts, distributed and standard switches,
                           port groups, VM folders and VMs. Objects keep their inventory names and carry
@@ -64,8 +64,8 @@
         -Command          the command (VCFOPS_SYNTH_COMMAND; default help)
         -ConfigPath       lab.json (VCFOPS_SYNTH_CONFIG; default /config/lab.json)
 
-    Signing in to VCF Operations (config, connect-test, plan, seed, backfill, content; the password only for
-    connect-test, seed, backfill and content):
+    Signing in to VCF Operations (config, connect-test, plan, seed, backfill, content, feed, scenario; the
+    password only for connect-test, seed, backfill, content, feed and scenario):
         -Fqdn             VCF Operations host name (VCFOPS_FQDN; default operations.fqdn)
         -Username         account (VCFOPS_USERNAME; default operations.username)
         -AuthSource       authentication source (VCFOPS_AUTHSOURCE; default operations.authSource)
@@ -92,9 +92,26 @@
                           tag and the vcfops-synth|tier and |application properties seed writes.
                           -DryRun        list what would be created or updated (VCFOPS_SYNTH_DRY_RUN)
 
+        feed              Pushes a live point for every seeded object each intervalMinutes, with analytics on, so
+                          capacity, symptoms and alerts run on it. Each series carries on from the backfill at the
+                          same levels; a gap since the last push (or the backfill's end) is filled first, with
+                          analytics off, up to 24 hours. Running scenarios are read every cycle. Runs until stopped.
+                          -Adapter       holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+                          -Cycles        stop after n cycles, e.g. 1 from a scheduled task (VCFOPS_SYNTH_CYCLES)
+                          -Concurrency   objects posted at once (VCFOPS_SYNTH_CONCURRENCY; default 8)
+                          -DryRun        prepare the feed and show the next point; push nothing (VCFOPS_SYNTH_DRY_RUN)
+        scenario          Lists the scenarios and the running ones; starts or stops one. A running feed picks the
+                          change up on its next cycle. S1 noisy neighbour, S2 memory pressure, S3 storage latency,
+                          S4 guest disk filling, S8 host failure.
+                          -Start         scenario to start: S1, S2, S3, S4 or S8 (VCFOPS_SYNTH_START)
+                          -Stop          scenario to stop, or all (VCFOPS_SYNTH_STOP)
+                          -Target        object to run it on, by inventory ID or name; default a busy one
+                                         (VCFOPS_SYNTH_TARGET)
+                          -RampMinutes   minutes to full effect (VCFOPS_SYNTH_RAMP_MINUTES; default 10)
+                          -Adapter       holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+
     Commands still to come, by build phase:
-        reset             Phase 3   Remove the objects seed created
-        feed, scenario    Phase 6   Live metrics and scenario overlays
+        reset             Phase 8   Remove the objects seed created
         live-load         Phase 9   Optional UPSA and load VMs
 
 .PARAMETER Command
@@ -119,7 +136,7 @@
     import: keep real names. VCFOPS_SYNTH_NO_ANONYMISE.
 
 .PARAMETER Adapter
-    seed, backfill: the vCenter adapter instance. VCFOPS_SYNTH_ADAPTER.
+    seed, backfill, feed, scenario: the holder adapter instance. VCFOPS_SYNTH_ADAPTER.
 
 .PARAMETER Refresh
     seed: push planned properties and stats to objects already there. VCFOPS_SYNTH_REFRESH.
@@ -144,6 +161,21 @@
 
 .PARAMETER Restart
     backfill: forget saved progress. VCFOPS_SYNTH_RESTART.
+
+.PARAMETER Cycles
+    feed: stop after this many cycles. VCFOPS_SYNTH_CYCLES.
+
+.PARAMETER Start
+    scenario: the scenario to start. VCFOPS_SYNTH_START.
+
+.PARAMETER Stop
+    scenario: the scenario to stop, or all. VCFOPS_SYNTH_STOP.
+
+.PARAMETER Target
+    scenario: the object to run it on. VCFOPS_SYNTH_TARGET.
+
+.PARAMETER RampMinutes
+    scenario: minutes to full effect. VCFOPS_SYNTH_RAMP_MINUTES.
 
 .PARAMETER Fqdn
     VCF Operations host name. VCFOPS_FQDN.
@@ -185,6 +217,9 @@
     docker service create --secret vcfops_password -e VCFOPS_SECRET_NAME=vcfops_password ... ghcr.io/msherian/vcfops-synth backfill
 
 .EXAMPLE
+    pwsh ./bin/vcfops-synth.ps1 scenario -Start S1 -ConfigPath ./config/lab.json
+
+.EXAMPLE
     pwsh ./bin/vcfops-synth.ps1 backfill -CredentialFile ~/Documents/vcf-installer-creds.json -ConfigPath ./config/lab.json
 
 .NOTES
@@ -219,6 +254,11 @@ param(
     [string]$Concurrency,
     [string]$MaxSamples,
     [switch]$Restart,
+    [string]$Cycles,
+    [string]$Start,
+    [string]$Stop,
+    [string]$Target,
+    [string]$RampMinutes,
 
     [string]$Fqdn,
     [string]$Username,
@@ -242,9 +282,7 @@ Import-Module $moduleRoot -Force
 $toolVersion = (Import-PowerShellDataFile -Path $moduleRoot).ModuleVersion
 
 $planned = [ordered]@{
-    'reset'     = 3
-    'feed'      = 6
-    'scenario'  = 6
+    'reset'     = 8
     'live-load' = 9
 }
 
@@ -255,23 +293,28 @@ $optionSpec = [ordered]@{
     Tiering     = @{ Env = 'VCFOPS_SYNTH_TIERING'; Type = 'text'; Commands = @('import') }
     Performance = @{ Env = 'VCFOPS_SYNTH_PERFORMANCE'; Type = 'text'; Commands = @('import') }
     NoAnonymise = @{ Env = 'VCFOPS_SYNTH_NO_ANONYMISE'; Type = 'switch'; Commands = @('import') }
-    Adapter     = @{ Env = 'VCFOPS_SYNTH_ADAPTER'; Type = 'text'; Commands = @('seed', 'backfill') }
+    Adapter     = @{ Env = 'VCFOPS_SYNTH_ADAPTER'; Type = 'text'; Commands = @('seed', 'backfill', 'feed', 'scenario') }
     Refresh     = @{ Env = 'VCFOPS_SYNTH_REFRESH'; Type = 'switch'; Commands = @('seed') }
-    DryRun      = @{ Env = 'VCFOPS_SYNTH_DRY_RUN'; Type = 'switch'; Commands = @('seed', 'backfill', 'content') }
+    DryRun      = @{ Env = 'VCFOPS_SYNTH_DRY_RUN'; Type = 'switch'; Commands = @('seed', 'backfill', 'content', 'feed') }
     Days        = @{ Env = 'VCFOPS_SYNTH_DAYS'; Type = 'count'; Commands = @('backfill') }
     Kinds       = @{ Env = 'VCFOPS_SYNTH_KINDS'; Type = 'list'; Commands = @('backfill') }
     MaxVms      = @{ Env = 'VCFOPS_SYNTH_MAX_VMS'; Type = 'count'; Commands = @('backfill') }
-    Concurrency = @{ Env = 'VCFOPS_SYNTH_CONCURRENCY'; Type = 'count'; Commands = @('backfill') }
+    Concurrency = @{ Env = 'VCFOPS_SYNTH_CONCURRENCY'; Type = 'count'; Commands = @('backfill', 'feed') }
     MaxSamples  = @{ Env = 'VCFOPS_SYNTH_MAX_SAMPLES'; Type = 'count'; Commands = @('backfill') }
     Restart     = @{ Env = 'VCFOPS_SYNTH_RESTART'; Type = 'switch'; Commands = @('backfill') }
+    Cycles      = @{ Env = 'VCFOPS_SYNTH_CYCLES'; Type = 'count'; Commands = @('feed') }
+    Start       = @{ Env = 'VCFOPS_SYNTH_START'; Type = 'text'; Commands = @('scenario') }
+    Stop        = @{ Env = 'VCFOPS_SYNTH_STOP'; Type = 'text'; Commands = @('scenario') }
+    Target      = @{ Env = 'VCFOPS_SYNTH_TARGET'; Type = 'text'; Commands = @('scenario') }
+    RampMinutes = @{ Env = 'VCFOPS_SYNTH_RAMP_MINUTES'; Type = 'count'; Commands = @('scenario') }
     # The module reads these variables itself, so only a parameter is passed on ('module').
-    Fqdn             = @{ Env = 'VCFOPS_FQDN'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content') }
-    Username         = @{ Env = 'VCFOPS_USERNAME'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content') }
-    AuthSource       = @{ Env = 'VCFOPS_AUTHSOURCE'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content') }
-    Password         = @{ Env = 'VCFOPS_PASSWORD'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content') }
-    PasswordFile     = @{ Env = 'VCFOPS_PASSWORD_FILE'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content') }
-    SecretName       = @{ Env = 'VCFOPS_SECRET_NAME'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content') }
-    CredentialFile   = @{ Env = 'VCFOPS_CREDENTIAL_FILE'; Type = 'text'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content') }
+    Fqdn             = @{ Env = 'VCFOPS_FQDN'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario') }
+    Username         = @{ Env = 'VCFOPS_USERNAME'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario') }
+    AuthSource       = @{ Env = 'VCFOPS_AUTHSOURCE'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario') }
+    Password         = @{ Env = 'VCFOPS_PASSWORD'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content', 'feed', 'scenario') }
+    PasswordFile     = @{ Env = 'VCFOPS_PASSWORD_FILE'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content', 'feed', 'scenario') }
+    SecretName       = @{ Env = 'VCFOPS_SECRET_NAME'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content', 'feed', 'scenario') }
+    CredentialFile   = @{ Env = 'VCFOPS_CREDENTIAL_FILE'; Type = 'text'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario') }
     AnonymisationKey = @{ Env = 'VCFOPS_SYNTH_ANON_KEY'; Type = 'module'; Commands = @('import') }
 }
 
@@ -388,6 +431,20 @@ function New-CliSeedPlan {
     if ($project) { $tags += @{ Category = 'Project'; Name = $project } }
     $plan = New-SynthSeedPlan -Inventory $Inventory -Rubric $Rubrics -VcId $Target.VcId -Prefix $Config.seed.prefix -Tag $tags -CustomAdapterKind $Config.adapterKind.key -PhysicalDatacenter $Config.seed.physicalDatacenter
     @{ Plan = $plan; Tags = $tags }
+}
+
+function Get-CliSeededPlan {
+    # Signs in, then the seed plan and the Operations ID of each planned object, for feed and scenario.
+    param($Config, $Inventory)
+    $adapterName = if ($options.Adapter) { $options.Adapter } else { $Config.seed.adapterInstance }
+    if (-not $adapterName) { throw 'No adapter instance. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
+    $rubricPath = if ($Config.seed.rubrics) { $Config.seed.rubrics } else { Join-Path $Config.paths.data 'rubrics' }
+    $rubrics = Get-SynthRubric -Path $rubricPath
+    $null = Connect-Cli -Config $Config
+    $target = Resolve-SynthSeedTarget -Name $adapterName
+    $plan = (New-CliSeedPlan -Config $Config -Inventory $Inventory -Rubrics $rubrics -Target $target).Plan
+    $ids = Resolve-SynthPlanId -Plan $plan -AdapterInstanceId $target.AdapterInstanceId
+    @{ Plan = $plan; Ids = $ids; Adapter = $adapterName }
 }
 
 try {
@@ -554,14 +611,14 @@ try {
 
             $null = Connect-Cli -Config $config
             try {
-                $target = Resolve-SynthSeedTarget -Name $adapterName -Create:(-not $options.DryRun)
-                if ($target.Created) { Write-Host "Created holder adapter instance '$adapterName'. Do not start it." }
-                if ($target.Collecting) { Write-Host "Warning: '$adapterName' collects from a vCenter. When it restarts it marks every seeded object its vCenter lacks as not existing, and groups and policies leave them out. Seed under a holder instance instead (seed.adapterInstance)." }
-                $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target
+                $seedTarget = Resolve-SynthSeedTarget -Name $adapterName -Create:(-not $options.DryRun)
+                if ($seedTarget.Created) { Write-Host "Created holder adapter instance '$adapterName'. Do not start it." }
+                if ($seedTarget.Collecting) { Write-Host "Warning: '$adapterName' collects from a vCenter. When it restarts it marks every seeded object its vCenter lacks as not existing, and groups and policies leave them out. Seed under a holder instance instead (seed.adapterInstance)." }
+                $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $seedTarget
                 $plan = $built.Plan
                 Write-Host "Tags: $(($built.Tags | ForEach-Object { "$($_.Category): $($_.Name)" }) -join '; ')"
                 $objects = @($plan.objects)
-                Write-Host "Seed plan for adapter instance $adapterName ($($target.AdapterInstanceId)), vCenter $($target.VcId):"
+                Write-Host "Seed plan for adapter instance $adapterName ($($seedTarget.AdapterInstanceId)), vCenter $($seedTarget.VcId):"
                 $objects | Group-Object { $_.kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count)" }
                 $edges = ($plan.links | ForEach-Object { @($_.children).Count } | Measure-Object -Sum).Sum
                 Write-Host "  $($objects.Count) objects, $edges links"
@@ -572,7 +629,7 @@ try {
                     exit 0
                 }
 
-                $result = Invoke-SynthSeed -Plan $plan -AdapterInstanceId $target.AdapterInstanceId -Refresh:$options.Refresh
+                $result = Invoke-SynthSeed -Plan $plan -AdapterInstanceId $seedTarget.AdapterInstanceId -Refresh:$options.Refresh
                 foreach ($kind in $result.created.Keys) {
                     Write-Host "  $($kind): $($result.created[$kind]) created, $($result.existing[$kind]) already there"
                 }
@@ -600,8 +657,8 @@ try {
 
             $null = Connect-Cli -Config $config
             try {
-                $target = Resolve-SynthSeedTarget -Name $adapterName
-                $plan = (New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $target).Plan
+                $seedTarget = Resolve-SynthSeedTarget -Name $adapterName
+                $plan = (New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $seedTarget).Plan
                 if ($options.Kinds) {
                     $unknown = @($options.Kinds | Where-Object { $_ -notin @($plan.objects | ForEach-Object { $_.kind }) })
                     if ($unknown.Count) { Write-Host "No planned objects of kind $($unknown -join ', '). Run 'help' for usage."; exit 2 }
@@ -611,7 +668,7 @@ try {
                     $keep = @($plan.objects | Where-Object { $_.kind -eq 'VirtualMachine' } | Sort-Object { $_.key } | Select-Object -First $options.MaxVms | ForEach-Object { $_.key })
                     $plan.objects = @($plan.objects | Where-Object { $_.kind -ne 'VirtualMachine' -or $_.key -in $keep })
                 }
-                $ids = Resolve-SynthPlanId -Plan $plan -AdapterInstanceId $target.AdapterInstanceId
+                $ids = Resolve-SynthPlanId -Plan $plan -AdapterInstanceId $seedTarget.AdapterInstanceId
                 $missing = @($plan.objects | Where-Object { -not $ids.ContainsKey($_.key) }).Count
                 $spec = @(New-SynthBackfillSpec -Plan $plan -Inventory $inventory -Ids $ids)
                 $series = ($spec | ForEach-Object { $_.Series.Count } | Measure-Object -Sum).Sum
@@ -640,6 +697,77 @@ try {
                 Disconnect-SynthOps -Confirm:$false
             }
             exit $(if ($result.failed.Count) { 1 } else { 0 })
+        }
+
+        'feed' {
+            $config = Get-CliConfig
+            $inventory = Get-SynthInventory -Path $config.paths.inventory
+            try {
+                $seeded = Get-CliSeededPlan -Config $config -Inventory $inventory
+                $step = $config.intervalMinutes * 60000
+                # The backfill's own range, so the live points carry on at the levels it set.
+                $range = Get-SynthBackfillRange -Days $config.backfillDays -IntervalMinutes $config.intervalMinutes
+                $range = (Read-SynthBackfillState -Path $config.paths.state -Range $range).range
+                $concurrency = if ($options.Concurrency) { $options.Concurrency } else { 8 }
+                $clock = [Diagnostics.Stopwatch]::StartNew()
+                $feed = [VcfOpsSynth.FeedObject[]]@(New-SynthFeedObject -Plan $seeded.Plan -Inventory $inventory -Ids $seeded.Ids -Range $range -TimeZone $config.timeZone -Concurrency $concurrency)
+                $series = ($feed | ForEach-Object { $_.Spec.Series.Count } | Measure-Object -Sum).Sum
+                Write-Host ('Feed for adapter instance {0}: {1} objects, {2:N0} series every {3} minutes (prepared in {4:N0} s)' -f $seeded.Adapter, $feed.Count, $series, $config.intervalMinutes, $clock.Elapsed.TotalSeconds)
+                $running = @(Read-SynthScenarioState -Path $config.paths.state)
+                foreach ($s in $running) { Write-Host "  Scenario $($s.id) $($s.name) on $($s.targetName)" }
+                $state = if (Test-Path -LiteralPath $config.paths.state) { Get-Content -LiteralPath $config.paths.state -Raw | ConvertFrom-Json -AsHashtable } else { @{} }
+                $last = if ($state -and $state.ContainsKey('feed') -and $state.feed.lastMs) { [long]$state.feed.lastMs } elseif ($state -and $state.ContainsKey('backfill')) { [long]$state.backfill.range.EndMs } else { 0 }
+                $times = Get-SynthFeedTime -LastMs $last -StepMs $step
+                Write-Host ('  Next point {0:u}; {1} catch-up points first' -f [DateTimeOffset]::FromUnixTimeMilliseconds($times.Live), $times.CatchUp.Count)
+                if ($options.DryRun) {
+                    Write-Host 'Dry run: nothing was pushed.'
+                    exit 0
+                }
+                $result = Invoke-SynthFeed -Feed $feed -Inventory $inventory -Plan $seeded.Plan -StatePath $config.paths.state -StepMs $step -TimeZone $config.timeZone -Cycles $(if ($options.Cycles) { $options.Cycles } else { 0 }) -Concurrency $concurrency -Verbose
+                Write-Host ('  {0} cycles, {1:N0} samples, {2} failed pushes' -f $result.cycles, $result.samples, $result.failed)
+            }
+            finally {
+                Disconnect-SynthOps -Confirm:$false
+            }
+            exit $(if ($result.failed) { 1 } else { 0 })
+        }
+
+        'scenario' {
+            $config = Get-CliConfig
+            $catalogue = Get-SynthScenarioCatalogue
+            if ($options.Start -and $options.Stop) { Write-Host "Give -Start or -Stop, not both. Run 'help' for usage."; exit 2 }
+            $wanted = if ($options.Start) { $options.Start } elseif ($options.Stop) { $options.Stop } else { $null }
+            if ($wanted -and -not $catalogue.Contains($wanted.ToUpperInvariant()) -and -not ($options.Stop -and $wanted -ieq 'all')) {
+                Write-Host "Unknown scenario '$wanted'. Scenarios: $($catalogue.Keys -join ', ')."
+                exit 2
+            }
+            if ($options.Target -and -not $options.Start) { Write-Host "-Target goes with -Start. Run 'help' for usage."; exit 2 }
+            if (-not $wanted) {
+                foreach ($id in $catalogue.Keys) { Write-Host ('  {0}  {1,-20} {2}' -f $id, $catalogue[$id].Name, $catalogue[$id].Description) }
+                $running = @(Read-SynthScenarioState -Path $config.paths.state)
+                Write-Host ''
+                if ($running.Count) { foreach ($s in $running) { Write-Host ('Running: {0} {1} on {2} since {3:u}' -f $s.id, $s.name, $s.targetName, [DateTimeOffset]::FromUnixTimeMilliseconds([long]$s.startedMs)) } }
+                else { Write-Host 'No scenario is running.' }
+                exit 0
+            }
+            $inventory = Get-SynthInventory -Path $config.paths.inventory
+            try {
+                $seeded = Get-CliSeededPlan -Config $config -Inventory $inventory
+                if ($options.Start) {
+                    $ramp = if ($options.RampMinutes) { $options.RampMinutes } else { 10 }
+                    $s = Start-SynthScenario -Id $options.Start -Inventory $inventory -Plan $seeded.Plan -StatePath $config.paths.state -Target $options.Target -RampMinutes $ramp -Ids $seeded.Ids
+                    Write-Host "Started $($s.id) $($s.name) on $($s.targetName), full effect after $ramp minutes. The feed applies it from its next cycle."
+                }
+                else {
+                    $stopped = @(Stop-SynthScenario -Id $options.Stop -Inventory $inventory -Plan $seeded.Plan -StatePath $config.paths.state -Ids $seeded.Ids)
+                    if ($stopped.Count) { foreach ($s in $stopped) { Write-Host "Stopped $($s.id) $($s.name) on $($s.targetName)." } }
+                    else { Write-Host "$($options.Stop) is not running." }
+                }
+            }
+            finally {
+                Disconnect-SynthOps -Confirm:$false
+            }
+            exit 0
         }
 
         { $planned.Contains($_) } {

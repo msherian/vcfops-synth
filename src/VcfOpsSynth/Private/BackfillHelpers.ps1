@@ -1,6 +1,6 @@
 # The generator and pusher are C#: 30 days at 5 minutes for every numeric key is billions of samples.
 if (-not ('VcfOpsSynth.Backfill' -as [type])) {
-    Add-Type -Path (Join-Path $PSScriptRoot 'BackfillEngine.cs') -ReferencedAssemblies 'System.Net.Http', 'System.Net.Primitives', 'System.Net.Security', 'System.Security.Cryptography', 'System.Collections', 'System.Linq', 'System.Threading', 'System.Console', 'System.Runtime', 'System.Text.Encoding.Extensions'
+    Add-Type -Path (Join-Path $PSScriptRoot 'BackfillEngine.cs') -ReferencedAssemblies 'System.Net.Http', 'System.Net.Primitives', 'System.Net.Security', 'System.Security.Cryptography', 'System.Collections', 'System.Linq', 'System.Threading', 'System.Console', 'System.Runtime', 'System.Text.Encoding.Extensions', 'System.Text.RegularExpressions', 'System.Threading.Tasks.Parallel'
 }
 
 function Get-SynthCalibration {
