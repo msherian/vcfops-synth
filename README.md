@@ -18,7 +18,7 @@ Phases 0 to 4 are done: the image, CLI and Suite API sign-in, the RVTools and Li
 | `seed` | Create the estate in VCF Operations under a holder adapter instance of its own | 3 |
 | `reset` | Remove the objects seed created (and, with `-IncludeContent`, the toolset's content) | 8 |
 | `backfill` | Push generated history for every numeric metric | 4 |
-| `content` | Custom groups, tier policies, symptoms, alerts, super metrics, list views and reports; dashboards to come | 5 to 7 |
+| `content` | Custom groups, tier policies, symptoms, alerts, super metrics, list views, reports and dashboards | 5 to 7 |
 | `feed` | Live point every interval with analytics on, carrying on from the backfill | 6 |
 | `scenario` | Start, stop and list scenario overlays (S1 to S4, S8) | 6 |
 | `live-load` | Optional UPSA and load VMs | to come (9) |
@@ -222,9 +222,9 @@ The alerts carry the tier thresholds themselves (through `vcfops-synth|tier`), s
 
 Each alert has a recommendation. The super metrics are VM CPU demand over allocation, the worst VM CPU ready and disk latency in each cluster, and the average VM health in each tier group; a policy must enable them before Operations computes them.
 
-### Views and reports
+### Views, reports and dashboards
 
-`content` then builds a content bundle, `<paths.data>/content-bundle.zip`, and imports it with force, so a re-run overwrites the views and reports by name. The bundle follows the layout of a VCF Operations 9.1.1 content export (`configuration.json`, `usermappings.json`, the `<id>L.v1` owner file, `views.zip`, `reports.zip`), and the signed-in user owns it. Each view and report has a fixed id worked out from its name. With `-DryRun` the bundle is written but not imported.
+`content` then builds a content bundle, `<paths.data>/content-bundle.zip`, and imports it with force, so a re-run overwrites the views and reports by name. The bundle follows the layout of a VCF Operations 9.1.1 content export (`configuration.json`, `usermappings.json`, the `<id>L.v1` owner file, `views.zip`, `reports.zip`, `dashboards/<owner>`), and the signed-in user owns it. Each view, report, dashboard and widget has a fixed id worked out from its name. With `-DryRun` the bundle is written but not imported.
 
 | View | Objects | Columns |
 |---|---|---|
@@ -239,7 +239,14 @@ Each alert has a recommendation. The super metrics are VM CPU demand over alloca
 | Weekly tier compliance | VM tier list, Cluster tier pressure |
 | Rightsizing | Oversized VMs, Undersized VMs |
 
-Reports open with a cover page and come as PDF and CSV. Super metric columns appear once the super metrics exist, since a view refers to a super metric by id. Dashboards follow in a later part of Phase 7.
+Reports open with a cover page and come as PDF and CSV. Super metric columns appear once the super metrics exist, since a view refers to a super metric by id.
+
+| Dashboard | Widgets |
+|---|---|
+| Service tiers | VM tier list, with Cluster tier pressure below |
+| Rightsizing and hygiene | Oversized VMs and Undersized VMs side by side, with VM configuration hygiene below |
+
+Each widget shows its view on the `Synth-Estate` group, so it lists the seeded objects only. A dry run on a lab where that group does not exist yet leaves the dashboards out of the bundle, since they need its id.
 
 ## Reset
 

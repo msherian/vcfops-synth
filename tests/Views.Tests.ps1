@@ -105,6 +105,63 @@ Describe 'ConvertTo-SynthReportXml' {
     }
 }
 
+Describe 'Get-SynthDashboardContent' {
+    It 'prefixes every dashboard, and every widget shows a view that exists' {
+        $names = @($script:content.Views | ForEach-Object Name)
+        foreach ($d in Get-SynthDashboardContent -Prefix 'Synth-') {
+            $d.Name | Should -BeLike 'Synth-*'
+            @($d.Widgets).Count | Should -BeGreaterThan 0
+            foreach ($w in $d.Widgets) {
+                $w.View | Should -BeIn $names
+                $w.X + $w.W - 1 | Should -BeLessOrEqual 12
+            }
+        }
+    }
+}
+
+Describe 'ConvertTo-SynthResourceKindId' {
+    It 'matches the form a 9.1.1 export uses' {
+        ConvertTo-SynthResourceKindId -AdapterKind 'VMWARE' -ResourceKind 'vSphere World' | Should -Be '002006VMWAREvSphere World'
+        ConvertTo-SynthResourceKindId -AdapterKind 'Container' -ResourceKind 'Universe' | Should -Be '002009ContainerUniverse'
+    }
+}
+
+Describe 'ConvertTo-SynthDashboard' {
+    BeforeAll {
+        $script:def = @(Get-SynthDashboardContent -Prefix 'Synth-' | Where-Object Name -eq 'Synth-Rightsizing and hygiene')[0]
+        $script:dash = ConvertTo-SynthDashboard -Definition $script:def -OwnerId 'owner-1' -ResourceId 'group-1' -ResourceName 'Synth-Estate' -Timestamp 1000
+    }
+
+    It 'has a fixed id, and each widget a fixed id of its own on that tab' {
+        $script:dash.id | Should -Be (Get-SynthContentId -Kind 'dashboard' -Name 'Synth-Rightsizing and hygiene')
+        $again = ConvertTo-SynthDashboard -Definition $script:def -OwnerId 'owner-1' -ResourceId 'group-1' -ResourceName 'Synth-Estate'
+        @($again.widgets | ForEach-Object id) -join ',' | Should -Be (@($script:dash.widgets | ForEach-Object id) -join ',')
+        @($script:dash.widgets | ForEach-Object id | Select-Object -Unique).Count | Should -Be @($script:def.Widgets).Count
+        @($script:dash.widgets | Where-Object { $_.tabId -ne $script:dash.id }).Count | Should -Be 0
+        "$($script:dash.userId) $($script:dash.lastUpdateUserId) $($script:dash.creationTime)" | Should -Be 'owner-1 owner-1 1000'
+    }
+
+    It 'shows each view by its id on the estate group' {
+        $w = $script:dash.widgets[1]
+        "$($w.type) $($w.title)" | Should -Be 'View Synth-Undersized VMs'
+        $w.config.viewDefinitionId | Should -Be (Get-SynthContentId -Kind 'view' -Name 'Synth-Undersized VMs')
+        $w.config.selfProvider.selfProvider | Should -BeTrue
+        $r = $w.config.resource
+        "$($r.resourceId) $($r.id) $($r.resourceName)" | Should -Be 'resource:id:group-1_::_ group-1 Synth-Estate'
+        $r.resourceKindId | Should -Be '002009ContainerEnvironment'
+        "$($w.gridsterCoords.x) $($w.gridsterCoords.y) $($w.gridsterCoords.w) $($w.gridsterCoords.h)" | Should -Be '7 1 6 8'
+    }
+
+    It 'survives the trip through the bundle as JSON' {
+        $path = Join-Path $TestDrive 'dash.zip'
+        $null = New-SynthContentBundle -Path $path -OwnerId 'owner-1' -Dashboard $script:dash
+        $root = & $script:unzip ([System.IO.File]::ReadAllBytes($path))
+        $dj = (& $script:text (& $script:unzip $root['dashboards/owner-1'])['dashboard/dashboard.json']) | ConvertFrom-Json
+        $dj.dashboards[0].widgets.Count | Should -Be 3
+        $dj.dashboards[0].widgets[0].config.resource.resourceKindId | Should -Be '002009ContainerEnvironment'
+    }
+}
+
 Describe 'New-SynthContentBundle' {
     BeforeAll {
         $script:views = @($script:content.Views | ForEach-Object { ConvertTo-SynthViewXml -Definition $_ })
