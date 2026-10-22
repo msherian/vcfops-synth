@@ -266,6 +266,75 @@ function Get-SynthDatastoreDatacenter {
     $null
 }
 
+function Get-SynthDatastoreLatency {
+    <#
+    .SYNOPSIS
+        A datastore's read and write latency, from the LiveOptics figures of the VMs on it.
+
+    .DESCRIPTION
+        Each side is the VMs' latency weighted by their IOPS on that side
+        (average by average IOPS, peak by peak IOPS), so a busy VM counts for
+        more than an idle one; with no IOPS figures every VM counts the same.
+        Only powered-on VMs with LiveOptics figures count. Returns $null when
+        none of the VMs has a latency figure.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([AllowNull()][AllowEmptyCollection()][object[]]$Vms)
+
+    $perfs = @(foreach ($vm in @($Vms)) {
+            if (-not $vm -or $vm.powerState -ne 'poweredOn') { continue }
+            if ($vm.Contains('baseline') -and $vm.baseline -is [System.Collections.IDictionary] -and $vm.baseline.Contains('perf') -and $vm.baseline.perf -is [System.Collections.IDictionary]) { , $vm.baseline.perf }
+        })
+    $get = { param($perf, $k) if ($k -and $perf.Contains($k) -and $null -ne $perf[$k]) { [double]$perf[$k] } else { $null } }
+    # The weighted mean of one figure over the VMs that have it; $null when none has.
+    $mean = {
+        param($latKey, $fallbackKey, $weightKey)
+        $pairs = @(foreach ($perf in $perfs) {
+                $lat = & $get $perf $latKey
+                if ($null -eq $lat) { $lat = & $get $perf $fallbackKey }
+                if ($null -eq $lat) { continue }
+                $w = & $get $perf $weightKey
+                , @($lat, $(if ($null -eq $w -or $w -lt 0) { 0.0 } else { $w }))
+            })
+        if (-not $pairs.Count) { return $null }
+        $total = 0.0; foreach ($x in $pairs) { $total += $x[1] }
+        $sum = 0.0
+        foreach ($x in $pairs) { $sum += $x[0] * $(if ($total -gt 0) { $x[1] } else { 1 }) }
+        [math]::Round($sum / $(if ($total -gt 0) { $total } else { $pairs.Count }), 3)
+    }
+    $out = @{}
+    foreach ($side in 'Read', 'Write') {
+        $avg = & $mean "$($side.ToLowerInvariant())LatencyAvgMs" $null "$($side.ToLowerInvariant())IopsAvg"
+        if ($null -eq $avg) { continue }
+        $peak = & $mean "$($side.ToLowerInvariant())LatencyPeakMs" "$($side.ToLowerInvariant())LatencyAvgMs" "$($side.ToLowerInvariant())IopsPeak"
+        $out["${side}Avg"] = $avg
+        $out["${side}Peak"] = [math]::Max($avg, $(if ($null -eq $peak) { $avg } else { $peak }))
+    }
+    if (-not $out.Count) { return $null }
+    $out
+}
+
+function Get-SynthExtraStatKey {
+    <#
+    .SYNOPSIS
+        Stat keys a kind carries even when its rubric lacks them.
+
+    .DESCRIPTION
+        The lab's datastore rubric came from a vSAN datastore, which has no
+        datastore latency keys; VMFS and NFS datastores do, and the
+        Synth-Datastore latency alert reads them.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)][string]$Kind)
+
+    switch ($Kind) {
+        'Datastore' { @('datastore|totalReadLatency_average', 'datastore|totalWriteLatency_average') }
+        default { @() }
+    }
+}
+
 function Get-SynthPlaceholder {
     <#
     .SYNOPSIS
@@ -475,6 +544,10 @@ function Get-SynthDerivedStat {
             $d['diskspace|diskspace_overcommit_ratio'] = if ($capGb -gt 0) { [math]::Round($provGb / $capGb, 2) } else { 0 }
             $d['summary|total_number_hosts'] = @($Item.hosts).Count
             $d['summary|total_number_vms'] = (& $children 'vmsByDatastore').Count
+            $latency = Get-SynthDatastoreLatency -Vms (& $children 'vmsByDatastore')
+            foreach ($side in 'Read', 'Write') {
+                $d["datastore|total${side}Latency_average"] = if ($latency -and $latency.Contains("${side}Avg")) { $latency["${side}Avg"] } else { 0 }
+            }
         }
     }
     $d

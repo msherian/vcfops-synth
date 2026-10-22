@@ -282,8 +282,14 @@ function New-SynthSeedPlan {
 
         $record.identifiers = @(Get-SynthSeedIdentifier -Kind $kind -Record $record -VcId $VcId)
         $derived = Get-SynthDerivedStat -Kind $kind -Item $item -Context $context
+        $statKeys = [System.Collections.Generic.HashSet[string]]::new()
         $record.stats = @(foreach ($s in (Join-SynthRubricEntry -Split $prep.Stats -Family $families)) {
+                $null = $statKeys.Add($s.key)
                 if ($derived.Contains($s.key)) { @{ key = $s.key; value = $derived[$s.key] } } else { $s }
+            }
+            # Keys a real object of the kind can have that the lab's rubric object lacked.
+            foreach ($key in (Get-SynthExtraStatKey -Kind $kind)) {
+                if (-not $statKeys.Contains($key)) { @{ key = $key; value = $(if ($derived.Contains($key)) { $derived[$key] } else { 0 }) } }
             })
         $seen = [System.Collections.Generic.HashSet[string]]::new()
         $record.properties = @(foreach ($p in (Join-SynthRubricEntry -Split $prep.Properties -Family $families)) {

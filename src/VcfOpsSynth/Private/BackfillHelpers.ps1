@@ -12,15 +12,24 @@ function Get-SynthCalibration {
         Returns key = @(average, peak, cap). Percentages are capped at 100;
         MHz and KB figures are the percentages over the object's own capacity.
         Powered-off VMs and objects without LiveOptics data get nothing here.
+        A datastore's latency comes from the VMs on it (-Vms).
     #>
     [CmdletBinding()]
     [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)][string]$Kind,
-        [Parameter(Mandatory)][System.Collections.IDictionary]$Item
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Item,
+        [AllowNull()][AllowEmptyCollection()][object[]]$Vms = @()
     )
 
     $out = @{}
+    if ($Kind -eq 'Datastore') {
+        $latency = Get-SynthDatastoreLatency -Vms $Vms
+        foreach ($side in 'Read', 'Write') {
+            if ($latency -and $latency.Contains("${side}Avg")) { $out["datastore|total${side}Latency_average"] = @($latency["${side}Avg"], $latency["${side}Peak"], [double]::NaN) }
+        }
+        return $out
+    }
     $perf = if ($Item.Contains('baseline') -and $Item.baseline -is [System.Collections.IDictionary] -and $Item.baseline.Contains('perf')) { $Item.baseline.perf } else { $null }
     if ($perf -isnot [System.Collections.IDictionary]) { return $out }
     $get = { param($k) if ($perf.Contains($k) -and $null -ne $perf[$k]) { [double]$perf[$k] } else { $null } }
@@ -131,6 +140,7 @@ function New-SynthBackfillSpec {
     # Each VM's curve, and which objects it feeds.
     $members = @{}
     $addTo = { param($key, $c) if ($key) { if (-not $members.ContainsKey($key)) { $members[$key] = [System.Collections.Generic.List[object]]::new() }; $members[$key].Add($c) } }
+    $vmsByDatastore = @{}
     $networkSwitch = @{}
     foreach ($net in @($Inventory.networks)) { if ($net.switch) { $networkSwitch[$net.id] = $net.switch } }
     foreach ($vm in @($Inventory.vms)) {
@@ -140,7 +150,10 @@ function New-SynthBackfillSpec {
         $mhz = if ($vm.cpu -and $vm.cpu.Contains('usageMhz') -and $vm.cpu.usageMhz) { [double]$vm.cpu.usageMhz } else { 0 }
         $c.Weight = [math]::Max(1, $mhz)
         foreach ($target in @($vm.id, $vm.host, $vm.cluster, $vm.datacenter, $vm.folderId)) { & $addTo $target $c }
-        foreach ($ds in @($vm.datastores)) { & $addTo $ds $c }
+        foreach ($ds in @($vm.datastores)) {
+            & $addTo $ds $c
+            if ($ds) { if (-not $vmsByDatastore.ContainsKey($ds)) { $vmsByDatastore[$ds] = [System.Collections.Generic.List[object]]::new() }; $vmsByDatastore[$ds].Add($vm) }
+        }
         $switchesSeen = @{}
         foreach ($nic in @($vm.nics)) {
             if (-not $nic -or -not $nic.network) { continue }
@@ -155,7 +168,8 @@ function New-SynthBackfillSpec {
         $numeric = @($object.stats | Where-Object { $_.value -is [ValueType] -and $_.value -isnot [bool] })
         if (-not $numeric.Count) { continue }
         $item = $items[$object.key]
-        $calibration = if ($item) { Get-SynthCalibration -Kind $object.kind -Item $item } else { @{} }
+        $onDatastore = if ($vmsByDatastore.ContainsKey($object.key)) { @($vmsByDatastore[$object.key]) } else { @() }
+        $calibration = if ($item) { Get-SynthCalibration -Kind $object.kind -Item $item -Vms $onDatastore } else { @{} }
         # Ops sums a VM's per-disk write throughput into the total, overwriting a pushed total, so the
         # first disk carries the LiveOptics figure (read too, so the per-disk view agrees); other disks stay 0.
         foreach ($total in 'virtualDisk|read_average', 'virtualDisk|write_average') {
