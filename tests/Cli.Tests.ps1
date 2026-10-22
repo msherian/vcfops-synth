@@ -49,9 +49,26 @@ Describe 'vcfops-synth CLI' {
     }
 
     It 'names the phase for a command not built yet' {
-        $result = Invoke-Cli @('feed')
+        $result = Invoke-Cli @('live-load')
         $result.ExitCode | Should -Be 3
-        $result.Output | Should -BeLike '*Phase 6*'
+        $result.Output | Should -BeLike '*Phase 9*'
+    }
+
+    It 'lists the scenarios and that none is running, without signing in' {
+        $config = Join-Path $TestDrive 'lab.json'
+        $lab = Get-Content -LiteralPath $script:example -Raw | ConvertFrom-Json -AsHashtable
+        $lab.paths = @{ data = "$TestDrive"; state = (Join-Path $TestDrive 'state.json'); inventory = (Join-Path $TestDrive 'inventory.json') }
+        $lab | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $config
+        $result = Invoke-Cli @('scenario', '-ConfigPath', $config)
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -BeLike '*S1*noisy-neighbour*S8*host-failure*No scenario is running.*'
+    }
+
+    It 'refuses an unknown scenario, -Target without -Start, and scenario options on other commands' {
+        (Invoke-Cli @('scenario', '-Start', 'S9', '-ConfigPath', $script:example)).Output | Should -BeLike "*Unknown scenario 'S9'*"
+        (Invoke-Cli @('scenario', '-Start', 'S9', '-ConfigPath', $script:example)).ExitCode | Should -Be 2
+        (Invoke-Cli @('scenario', '-Target', 'x', '-ConfigPath', $script:example)).ExitCode | Should -Be 2
+        (Invoke-Cli @('feed', '-Start', 'S1')).Output | Should -BeLike "*'feed' does not take -Start*"
     }
 
     It 'builds seed now, so it no longer reports Phase 3' {

@@ -15,11 +15,12 @@ Phases 0 to 4 are done: the image, CLI and Suite API sign-in, the RVTools and Li
 | `connect-test` | Signs in to VCF Operations and prints its version | 1 |
 | `plan` | Dry run: what each stage would do | 1 |
 | `import` | RVTools export to inventory model | 2 |
-| `seed` | Create the estate in VCF Operations under a vCenter adapter instance | 3 |
+| `seed` | Create the estate in VCF Operations under a holder adapter instance of its own | 3 |
 | `reset` | Remove what the toolset created, found by tag and identifier | to come (8) |
 | `backfill` | Push generated history for every numeric metric | 4 |
+| `feed` | Live point every interval with analytics on, carrying on from the backfill | 6 |
+| `scenario` | Start, stop and list scenario overlays (S1 to S4, S8) | 6 |
 | `content` | Custom groups and tier policies (alerts and dashboards to come) | 5 (6 and 7 to come) |
-| `feed`, `scenario` | Live metrics and scenario overlays | to come (6) |
 | `live-load` | Optional UPSA and load VMs | to come (9) |
 
 ## Quick start
@@ -98,15 +99,20 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-Tiering` | `VCFOPS_SYNTH_TIERING` | import | Tiering rules; default `import.tiering` |
 | `-Performance` | `VCFOPS_SYNTH_PERFORMANCE` | import | LiveOptics VMware workbook; default `import.performance` |
 | `-NoAnonymise` | `VCFOPS_SYNTH_NO_ANONYMISE` | import | Keep real names |
-| `-Adapter` | `VCFOPS_SYNTH_ADAPTER` | seed, backfill | Holder adapter instance; default `seed.adapterInstance` (`vcfops-synth holder - do not start`) |
+| `-Adapter` | `VCFOPS_SYNTH_ADAPTER` | seed, backfill, feed, scenario | Holder adapter instance; default `seed.adapterInstance` (`vcfops-synth holder - do not start`) |
 | `-Refresh` | `VCFOPS_SYNTH_REFRESH` | seed | Push properties and stats to objects already there |
-| `-DryRun` | `VCFOPS_SYNTH_DRY_RUN` | seed, backfill | Report only; change nothing |
+| `-DryRun` | `VCFOPS_SYNTH_DRY_RUN` | seed, backfill, content, feed | Report only; change nothing |
 | `-Days` | `VCFOPS_SYNTH_DAYS` | backfill | Days of history; default `backfillDays` |
 | `-Kinds` | `VCFOPS_SYNTH_KINDS` | backfill | Comma-separated resource kinds |
 | `-MaxVms` | `VCFOPS_SYNTH_MAX_VMS` | backfill | First n VMs only, for a pilot |
-| `-Concurrency` | `VCFOPS_SYNTH_CONCURRENCY` | backfill | Objects posted at once; default 4 |
+| `-Concurrency` | `VCFOPS_SYNTH_CONCURRENCY` | backfill, feed | Objects posted at once; default 4 (feed 8) |
 | `-MaxSamples` | `VCFOPS_SYNTH_MAX_SAMPLES` | backfill | Samples per post, halved when refused; default 100000 |
 | `-Restart` | `VCFOPS_SYNTH_RESTART` | backfill | Forget saved progress |
+| `-Cycles` | `VCFOPS_SYNTH_CYCLES` | feed | Stop after n cycles; default runs until stopped |
+| `-Start` | `VCFOPS_SYNTH_START` | scenario | Scenario to start: S1, S2, S3, S4 or S8 |
+| `-Stop` | `VCFOPS_SYNTH_STOP` | scenario | Scenario to stop, or `all` |
+| `-Target` | `VCFOPS_SYNTH_TARGET` | scenario | Object to run it on, by inventory ID or name |
+| `-RampMinutes` | `VCFOPS_SYNTH_RAMP_MINUTES` | scenario | Minutes to full effect; default 10 |
 | `-Fqdn` | `VCFOPS_FQDN` | config, connect-test, plan, seed, backfill | VCF Operations host name; default `operations.fqdn` |
 | `-Username` | `VCFOPS_USERNAME` | config, connect-test, plan, seed, backfill | Account; default `operations.username` |
 | `-AuthSource` | `VCFOPS_AUTHSOURCE` | config, connect-test, plan, seed, backfill | Authentication source; default `operations.authSource` |
@@ -158,6 +164,26 @@ Findings that shaped the code:
 - **Seeded objects are found by tag and identifier, not prefix.** They keep their inventory names and carry the `vcfops-synth` and project tags; their managed object IDs contain `-synth-`.
 - **Memory:** a full plan and spec takes about 500 MB in one PowerShell process. On an 8 GB host the backfill and the verification were killed for low memory; 32 GB runs the whole sequence comfortably. On a small host, use `-Concurrency 2`.
 
+## Live feed and scenarios
+
+`feed` pushes one point for every seeded object each `intervalMinutes`, with analytics processing on, so capacity, symptoms and alerts run on current data. Each series carries on from the backfill at the levels it set: the scaling is worked out once over the backfill's range, and the live points follow the same workload curves. A gap since the last push, or since the backfill ended, is filled first with analytics off (up to 24 hours). The feed runs until stopped; `-Cycles 1` pushes one cycle and exits, for a scheduled task every five minutes. Progress is saved in `paths.state`, so a restart never pushes a point twice.
+
+`scenario` starts and stops overlays on chosen objects; a running feed picks the change up on its next cycle, ramping in over `-RampMinutes` (default 10). Without `-Target` each scenario picks a busy object.
+
+| Scenario | Target | What changes |
+|---|---|---|
+| S1 noisy neighbour | host | Bronze VMs take 95 % CPU and are marked `vcfops-synth\|scenario`; Gold and Silver VMs there see 12 % ready and 15 % contention; the host demands 115 % |
+| S2 memory pressure | host | Its VMs balloon 25 % and swap; the host runs at 98 % memory with contention |
+| S3 storage latency | datastore | 45 ms read and write latency on the datastore and the VMs on it |
+| S4 guest disk filling | VM | Each guest file system fills to 95 % of its capacity |
+| S8 host failure | host | The host stops reporting and shows as not responding; the other hosts in its cluster take its load and the cluster loses its capacity |
+
+```bash
+pwsh ./bin/vcfops-synth.ps1 feed -ConfigPath ./config/lab.json
+pwsh ./bin/vcfops-synth.ps1 scenario -Start S1 -ConfigPath ./config/lab.json
+pwsh ./bin/vcfops-synth.ps1 scenario -Stop all -ConfigPath ./config/lab.json
+```
+
 ## Content: groups and tier policies
 
 `content` publishes, by name with the prefix (existing ones are updated in place, keeping their ids):
@@ -174,6 +200,7 @@ The tier policies come from an SLA matrix, the part of the design that carries t
 | Bronze | 30 / 10 | 0% | VM memory pressure |
 
 The alerts carry the tier thresholds themselves (through `vcfops-synth|tier`), so the policies only switch alerts on or off. The capacity buffer is a cluster setting, so it only applies to clusters a tier policy is assigned to; today clusters get `Synth-Base`.
+
 ## Development
 
 PowerShell 7.4 or later, Pester 5 and PSScriptAnalyzer. Tests need no lab.
