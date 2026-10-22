@@ -254,6 +254,8 @@ function New-SynthSeedPlan {
                     $set['summary|parentHostVersion4d'] = "$($Matches[0]).0"
                 }
                 $families = Get-SynthVmFamily -Vm $item -Record $record -NameOf $nameOf
+                # The toolset's own keys: custom groups and policies select VMs on them.
+                foreach ($field in 'tier', 'application', 'profile') { if ($item.Contains($field) -and $item[$field]) { $set["vcfops-synth|$field"] = [string]$item[$field] } }
             }
         }
         # Kinds with no rubric (a Physical Data Center, standard switches and port groups) carry only what the inventory says.
@@ -288,9 +290,9 @@ function New-SynthSeedPlan {
                 $null = $seen.Add($p.key)
                 if ($set.Contains($p.key)) { @{ key = $p.key; value = $set[$p.key] } } else { $p }
             }
-            # A kind with a rubric keeps exactly the rubric's keys, plus the tag; one without gets everything the inventory gave.
+            # A kind with a rubric keeps exactly the rubric's keys, plus the tag and the toolset's own keys; one without gets everything the inventory gave.
             foreach ($key in $set.Keys) {
-                if (-not $seen.Contains($key) -and (-not $hasRubric -or $tagSet.Contains($key))) { @{ key = $key; value = $set[$key] } }
+                if (-not $seen.Contains($key) -and (-not $hasRubric -or $tagSet.Contains($key) -or $key -like 'vcfops-synth|*')) { @{ key = $key; value = $set[$key] } }
             })
     }
 

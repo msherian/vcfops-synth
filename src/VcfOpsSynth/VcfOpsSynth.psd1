@@ -31,6 +31,14 @@
         'New-SynthBackfillSpec'
         'Invoke-SynthBackfill'
         'Read-SynthBackfillState'
+        'Get-SynthGroupDefinition'
+        'ConvertTo-SynthGroupBody'
+        'Publish-SynthGroup'
+        'Get-SynthSla'
+        'Get-SynthPolicyDefinition'
+        'ConvertTo-SynthPolicyXml'
+        'ConvertTo-SynthPolicySettingsBody'
+        'Publish-SynthPolicy'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

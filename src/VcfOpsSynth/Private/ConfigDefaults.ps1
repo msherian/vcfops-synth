@@ -48,6 +48,10 @@ function Get-SynthConfigDefault {
             # Name of a Physical Data Center above the datacenters; empty means none.
             physicalDatacenter = ''
         }
+        content        = @{
+            # SLA matrix the tier policies are built from (shape of config/sla.example.json); empty means the built-in one.
+            sla = ''
+        }
         liveLoad       = @{
             enabled      = $false
             maxLoadVms   = 6
