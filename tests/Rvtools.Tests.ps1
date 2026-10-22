@@ -353,24 +353,6 @@ Describe 'LiveOptics performance' -Skip:(-not (Get-Module -ListAvailable -Name I
         (Get-Vm $inventory 'web-shop-01').baseline.perf | Should -BeNullOrEmpty
     }
 
-    It 'reads a latency over the ceiling as missing and counts it' {
-        $path = Join-Path $TestDrive 'LiveOptics_000001_VMWARE_09_04_2026.xlsx'
-        $row = (& $vm 'app-pay-01' 'vm-1001' 30 90 40 60)
-        $row.'Avg Write Latency' = 9065552324; $row.'Peak Write Latency' = 683212743470723
-        $row | Export-Excel -Path $path -WorksheetName 'VM Performance'
-        [pscustomobject]@{ Host = 'esx01.example.test'; 'Peak Read Latency' = 8; 'Peak Write Latency' = 12000; 'Avg Read Latency' = 1; 'Avg Write Latency' = 1.2 } | Export-Excel -Path $path -WorksheetName 'ESX Performance'
-        $read = Read-SynthLiveOptics -Path $path
-        $read.LatencyDropped | Should -Be 3
-        $read.Vms[0].Values.writeLatencyAvgMs | Should -BeNullOrEmpty
-        $read.Vms[0].Values.writeLatencyPeakMs | Should -BeNullOrEmpty
-        $read.Vms[0].Values.readLatencyPeakMs | Should -Be 12
-        $read.Hosts[0].Values.writeLatencyPeakMs | Should -BeNullOrEmpty
-        $perf.LatencyDropped | Should -Be 0
-        $inv = Import-SynthRvtools -Path $script:fixture -Key $script:key -TieringRules $script:rules -Performance $read
-        $inv.report.performance.latencyDropped | Should -Be 3
-        $inv.report.warnings | Should -Contain 'LiveOptics has 3 latency figure(s) over 10,000 ms; they were read as missing.'
-    }
-
     It 'keeps the RVTools sample alongside' {
         (Get-Vm $inventory 'app-pay-01').baseline.cpuUsagePct | Should -Be 25
     }

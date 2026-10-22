@@ -69,19 +69,13 @@ function Read-SynthLiveOptics {
     .PARAMETER Path
         The LiveOptics VMware xlsx (LiveOptics_<project>_VMWARE_<date>.xlsx).
 
-    .PARAMETER LatencyCeilingMs
-        A latency above this many milliseconds is read as missing and counted in LatencyDropped.
-
     .OUTPUTS
-        @{ CollectedOn; Vms = list; Hosts = list; VmsById; VmsByName; HostsByName; LatencyDropped }
+        @{ CollectedOn; Vms = list; Hosts = list; VmsById; VmsByName; HostsByName }
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'LiveOptics is the product name, not a plural.')]
     [CmdletBinding()]
     [OutputType([hashtable])]
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [double]$LatencyCeilingMs = 10000
-    )
+    param([Parameter(Mandatory)][string]$Path)
 
     if (-not (Test-Path -LiteralPath $Path)) { throw "LiveOptics workbook '$Path' was not found." }
     if ([System.IO.Path]::GetExtension($Path) -ine '.xlsx') { throw "'$Path' is not an .xlsx file. Use the LiveOptics VMware workbook." }
@@ -99,7 +93,6 @@ function Read-SynthLiveOptics {
         VmsById     = @{}
         VmsByName   = @{}
         HostsByName = @{}
-        LatencyDropped = 0
     }
     foreach ($tab in 'VM Performance', 'ESX Performance') {
         if ($tab -notin $sheets) { throw "'$Path' has no '$tab' sheet. Is this the LiveOptics VMware workbook?" }
@@ -112,18 +105,10 @@ function Read-SynthLiveOptics {
         if ($date) { $result.CollectedOn = ConvertTo-SynthDateText ([string]$date.P2) }
     }
 
-    $ceiling = $LatencyCeilingMs
     $numbers = {
         param($Row, $Columns, [string[]]$Fields)
         $values = [ordered]@{}
-        foreach ($field in $Fields) {
-            $value = ConvertTo-SynthNumber (Get-SynthRvCell $Row $Columns $field)
-            # LiveOptics exports hold the odd corrupt latency (billions of ms); such a value is treated as missing.
-            if ($field -like '*LatencyAvgMs' -or $field -like '*LatencyPeakMs') {
-                if ($null -ne $value -and [double]$value -gt $ceiling) { $value = $null; $result.LatencyDropped++ }
-            }
-            $values[$field] = $value
-        }
+        foreach ($field in $Fields) { $values[$field] = ConvertTo-SynthNumber (Get-SynthRvCell $Row $Columns $field) }
         $values
     }
 
