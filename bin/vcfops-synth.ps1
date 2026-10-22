@@ -89,11 +89,17 @@
                           application from the tier rules, and the scenario targets), by name with the prefix;
                           existing ones are updated. Membership follows the synthetic tag and the vcfops-synth|tier
                           and |application properties seed writes. Then the symptoms, alerts (with tier thresholds),
-                          recommendations and super metrics the scenarios raise, and last the policies (Synth-Base
+                          recommendations and super metrics the scenarios raise, then the policies (Synth-Base
                           on the estate switches on every Synth- alert, a tier policy on each tier group, from the
-                          SLA matrix in content.sla). Exit code 1 when any item is rejected; the rest are still
-                          published. Dashboards in Phase 7.
-                          -DryRun        list what would be created or updated (VCFOPS_SYNTH_DRY_RUN)
+                          SLA matrix in content.sla). Last the list views and reports (VM tier list, oversized and
+                          undersized VMs, configuration hygiene, cluster tier pressure; weekly tier compliance and
+                          rightsizing reports), written to <paths.data>/content-bundle.zip and imported with force,
+                          so a re-run overwrites them by name. Exit code 1 when any item is rejected; the rest are
+                          still published. Dashboards later in Phase 7.
+                          -DryRun        list what would be created or updated, and write the bundle without
+                                         importing it (VCFOPS_SYNTH_DRY_RUN)
+                          -ImportField   multipart field the bundle is sent in (VCFOPS_SYNTH_IMPORT_FIELD;
+                                         default contentFile)
 
         feed              Pushes a live point for every seeded object each intervalMinutes, with analytics on, so
                           capacity, symptoms and alerts run on it. Each series carries on from the backfill at the
@@ -162,6 +168,9 @@
 .PARAMETER IncludeContent
     reset: also delete the prefixed policies, alerts, symptoms, recommendations, super metrics and custom groups.
     VCFOPS_SYNTH_INCLUDE_CONTENT.
+
+.PARAMETER ImportField
+    content: the multipart field name for the content bundle import. VCFOPS_SYNTH_IMPORT_FIELD.
 
 .PARAMETER Days
     backfill: days of history. VCFOPS_SYNTH_DAYS.
@@ -267,6 +276,7 @@ param(
     [switch]$DryRun,
     [switch]$Force,
     [switch]$IncludeContent,
+    [string]$ImportField,
 
     # Numbers are taken as text and checked here, so a bad value is exit code 2, not a binding failure.
     [string]$Days,
@@ -317,6 +327,7 @@ $optionSpec = [ordered]@{
     Refresh     = @{ Env = 'VCFOPS_SYNTH_REFRESH'; Type = 'switch'; Commands = @('seed') }
     Force       = @{ Env = 'VCFOPS_SYNTH_FORCE'; Type = 'switch'; Commands = @('reset') }
     IncludeContent = @{ Env = 'VCFOPS_SYNTH_INCLUDE_CONTENT'; Type = 'switch'; Commands = @('reset') }
+    ImportField = @{ Env = 'VCFOPS_SYNTH_IMPORT_FIELD'; Type = 'text'; Commands = @('content') }
     DryRun      = @{ Env = 'VCFOPS_SYNTH_DRY_RUN'; Type = 'switch'; Commands = @('seed', 'backfill', 'content', 'feed', 'reset') }
     Days        = @{ Env = 'VCFOPS_SYNTH_DAYS'; Type = 'count'; Commands = @('backfill') }
     Kinds       = @{ Env = 'VCFOPS_SYNTH_KINDS'; Type = 'list'; Commands = @('backfill') }
@@ -607,11 +618,13 @@ try {
             try {
                 $results = @(Publish-SynthGroup -Definition $groups -Prefix $config.prefix -WhatIf:([bool]$options.DryRun))
                 foreach ($r in $results) { Write-Host ('  {0,-14} {1}' -f $r.Action, $r.Name) }
+                $superMetricId = @{}
                 foreach ($r in @(Publish-SynthAlertContent -Content $alertContent -Prefix $config.prefix -WhatIf:([bool]$options.DryRun))) {
                     Write-Host ('  {0,-14} {1,-14} {2}' -f $r.Action, $r.Kind, $r.Name)
                     if ($r.Error) { $failed++; Write-Host "    $($r.Error)" }
+                    if ($r.Kind -eq 'super metric' -and $r.Id) { $superMetricId[$r.Name] = $r.Id }
                 }
-                # Policies last, so Synth-Base switches on the alerts this run created.
+                # Policies after the alerts, so Synth-Base switches on the alerts this run created.
                 $alerts = @((Invoke-SynthOpsRequest -Method Get -Path 'alertdefinitions' -Query @{ pageSize = 5000 }).alertDefinitions)
                 $policies = @(Get-SynthPolicyDefinition -Sla $sla -AlertDefinition $alerts -Prefix $config.prefix)
                 $groupIdByKey = @{}
@@ -623,7 +636,28 @@ try {
                 foreach ($r in @(Publish-SynthPolicy -Definition $policies -GroupIdByKey $groupIdByKey -Prefix $config.prefix -WhatIf:([bool]$options.DryRun))) {
                     Write-Host ('  {0,-14} {1} (groups: {2})' -f $r.Action, $r.Name, $r.Groups)
                 }
-                if ($options.DryRun) { Write-Host 'Dry run: nothing was changed.' }
+
+                # Views and reports go in through a content bundle; a view refers to a super metric by id.
+                $viewContent = Get-SynthViewContent -Prefix $config.prefix -SuperMetricId $superMetricId
+                $views = @($viewContent.Views | ForEach-Object { ConvertTo-SynthViewXml -Definition $_ })
+                $reports = @($viewContent.Reports | ForEach-Object { ConvertTo-SynthReportXml -Definition $_ -View $viewContent.Views })
+                # The signed-in user owns the content; a directory user's @domain is not part of the Operations user name.
+                $ownerName = ([string]$config.operations.username) -replace '@.*$'
+                $ownerId = Get-SynthOpsUserId -UserName $ownerName
+                $bundle = New-SynthContentBundle -Path (Join-Path $config.paths.data 'content-bundle.zip') -OwnerId $ownerId -UserName $ownerName -View $views -Report $reports
+                foreach ($v in $viewContent.Views) { Write-Host ('  {0,-14} {1,-14} {2}' -f $(if ($options.DryRun) { 'would import' } else { 'import' }), 'view', $v.Name) }
+                foreach ($r in $viewContent.Reports) { Write-Host ('  {0,-14} {1,-14} {2}' -f $(if ($options.DryRun) { 'would import' } else { 'import' }), 'report', $r.Name) }
+                Write-Host "  Bundle: $($bundle.Path) ($($bundle.Views) views, $($bundle.Reports) reports)"
+                if (-not $options.DryRun) {
+                    $field = if ($options.ImportField) { $options.ImportField } else { 'contentFile' }
+                    $import = Import-SynthContentBundle -Path $bundle.Path -Force -FieldName $field
+                    Write-Host "  Import $($import.State.ToLowerInvariant())"
+                    # Printed as Operations returns them: one summary per content type, with its counts.
+                    foreach ($s in $import.Summaries) { Write-Host "    $($s | ConvertTo-Json -Depth 5 -Compress)" }
+                    foreach ($m in $import.Errors) { Write-Host "    $m" }
+                    if ($import.State -ne 'FINISHED' -or $import.Errors.Count) { $failed++ }
+                }
+                if ($options.DryRun) { Write-Host 'Dry run: nothing was changed in Operations.' }
             }
             finally {
                 Disconnect-SynthOps -Confirm:$false
