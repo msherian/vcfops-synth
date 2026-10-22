@@ -33,8 +33,13 @@ function Read-SynthCredentialFile {
     )
 
     if (-not (Test-Path -LiteralPath $Path)) { throw "Credentials file '$Path' does not exist." }
+    # Reading and parsing fail for different reasons, so each gets its own message: in a container an
+    # unreadable mount (the image runs as uid 999) is far more likely than a broken file.
+    $text = $null
+    try { $text = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop }
+    catch { throw "Credentials file '$Path' cannot be read: $($_.Exception.Message) In a container, check that the user it runs as (uid 999 unless --user is set) can read the file." }
     $doc = $null
-    try { $doc = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable }
+    try { $doc = $text | ConvertFrom-Json -AsHashtable }
     catch { throw "Credentials file '$Path' is not valid JSON." }
     if ($doc -isnot [System.Collections.IDictionary] -or -not $doc.Contains('components')) {
         throw "'$Path' is not a VCF installer credentials file: it has no components list."
