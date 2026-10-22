@@ -64,8 +64,8 @@
         -Command          the command (VCFOPS_SYNTH_COMMAND; default help)
         -ConfigPath       lab.json (VCFOPS_SYNTH_CONFIG; default /config/lab.json)
 
-    Signing in to VCF Operations (config, connect-test, plan, seed, backfill, content, feed, scenario; the
-    password only for connect-test, seed, backfill, content, feed and scenario):
+    Signing in to VCF Operations (config, connect-test, plan, seed, backfill, content, feed, scenario, reset;
+    the password only for connect-test, seed, backfill, content, feed, scenario and reset):
         -Fqdn             VCF Operations host name (VCFOPS_FQDN; default operations.fqdn)
         -Username         account (VCFOPS_USERNAME; default operations.username)
         -AuthSource       authentication source (VCFOPS_AUTHSOURCE; default operations.authSource)
@@ -113,8 +113,17 @@
                           -RampMinutes   minutes to full effect (VCFOPS_SYNTH_RAMP_MINUTES; default 10)
                           -Adapter       holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
 
+        reset             Deletes the objects seed created, VMs first, found by kind and unique identifier and
+                          deleted only when they carry the synthetic tag (seed.tag); then forgets the backfill,
+                          feed and scenario state. Reports only, unless -Force is given.
+                          -Force          delete for real (VCFOPS_SYNTH_FORCE)
+                          -IncludeContent also delete the prefixed policies, alerts, symptoms, recommendations,
+                                          super metrics and custom groups; views and dashboards stay
+                                          (VCFOPS_SYNTH_INCLUDE_CONTENT)
+                          -DryRun         report only, even with -Force (VCFOPS_SYNTH_DRY_RUN)
+                          -Adapter        holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
+
     Commands still to come, by build phase:
-        reset             Phase 8   Remove the objects seed created
         live-load         Phase 9   Optional UPSA and load VMs
 
 .PARAMETER Command
@@ -145,7 +154,14 @@
     seed: push planned properties and stats to objects already there. VCFOPS_SYNTH_REFRESH.
 
 .PARAMETER DryRun
-    seed, backfill: report what would be done; change nothing. VCFOPS_SYNTH_DRY_RUN.
+    seed, backfill, content, feed, reset: report what would be done; change nothing. VCFOPS_SYNTH_DRY_RUN.
+
+.PARAMETER Force
+    reset: delete for real; without it reset only reports. VCFOPS_SYNTH_FORCE.
+
+.PARAMETER IncludeContent
+    reset: also delete the prefixed policies, alerts, symptoms, recommendations, super metrics and custom groups.
+    VCFOPS_SYNTH_INCLUDE_CONTENT.
 
 .PARAMETER Days
     backfill: days of history. VCFOPS_SYNTH_DAYS.
@@ -249,6 +265,8 @@ param(
     [string]$Adapter,
     [switch]$Refresh,
     [switch]$DryRun,
+    [switch]$Force,
+    [switch]$IncludeContent,
 
     # Numbers are taken as text and checked here, so a bad value is exit code 2, not a binding failure.
     [string]$Days,
@@ -285,7 +303,6 @@ Import-Module $moduleRoot -Force
 $toolVersion = (Import-PowerShellDataFile -Path $moduleRoot).ModuleVersion
 
 $planned = [ordered]@{
-    'reset'     = 8
     'live-load' = 9
 }
 
@@ -296,9 +313,11 @@ $optionSpec = [ordered]@{
     Tiering     = @{ Env = 'VCFOPS_SYNTH_TIERING'; Type = 'text'; Commands = @('import') }
     Performance = @{ Env = 'VCFOPS_SYNTH_PERFORMANCE'; Type = 'text'; Commands = @('import') }
     NoAnonymise = @{ Env = 'VCFOPS_SYNTH_NO_ANONYMISE'; Type = 'switch'; Commands = @('import') }
-    Adapter     = @{ Env = 'VCFOPS_SYNTH_ADAPTER'; Type = 'text'; Commands = @('seed', 'backfill', 'feed', 'scenario') }
+    Adapter     = @{ Env = 'VCFOPS_SYNTH_ADAPTER'; Type = 'text'; Commands = @('seed', 'backfill', 'feed', 'scenario', 'reset') }
     Refresh     = @{ Env = 'VCFOPS_SYNTH_REFRESH'; Type = 'switch'; Commands = @('seed') }
-    DryRun      = @{ Env = 'VCFOPS_SYNTH_DRY_RUN'; Type = 'switch'; Commands = @('seed', 'backfill', 'content', 'feed') }
+    Force       = @{ Env = 'VCFOPS_SYNTH_FORCE'; Type = 'switch'; Commands = @('reset') }
+    IncludeContent = @{ Env = 'VCFOPS_SYNTH_INCLUDE_CONTENT'; Type = 'switch'; Commands = @('reset') }
+    DryRun      = @{ Env = 'VCFOPS_SYNTH_DRY_RUN'; Type = 'switch'; Commands = @('seed', 'backfill', 'content', 'feed', 'reset') }
     Days        = @{ Env = 'VCFOPS_SYNTH_DAYS'; Type = 'count'; Commands = @('backfill') }
     Kinds       = @{ Env = 'VCFOPS_SYNTH_KINDS'; Type = 'list'; Commands = @('backfill') }
     MaxVms      = @{ Env = 'VCFOPS_SYNTH_MAX_VMS'; Type = 'count'; Commands = @('backfill') }
@@ -311,13 +330,13 @@ $optionSpec = [ordered]@{
     Target      = @{ Env = 'VCFOPS_SYNTH_TARGET'; Type = 'text'; Commands = @('scenario') }
     RampMinutes = @{ Env = 'VCFOPS_SYNTH_RAMP_MINUTES'; Type = 'count'; Commands = @('scenario') }
     # The module reads these variables itself, so only a parameter is passed on ('module').
-    Fqdn             = @{ Env = 'VCFOPS_FQDN'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario') }
-    Username         = @{ Env = 'VCFOPS_USERNAME'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario') }
-    AuthSource       = @{ Env = 'VCFOPS_AUTHSOURCE'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario') }
-    Password         = @{ Env = 'VCFOPS_PASSWORD'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content', 'feed', 'scenario') }
-    PasswordFile     = @{ Env = 'VCFOPS_PASSWORD_FILE'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content', 'feed', 'scenario') }
-    SecretName       = @{ Env = 'VCFOPS_SECRET_NAME'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content', 'feed', 'scenario') }
-    CredentialFile   = @{ Env = 'VCFOPS_CREDENTIAL_FILE'; Type = 'text'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario') }
+    Fqdn             = @{ Env = 'VCFOPS_FQDN'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario', 'reset') }
+    Username         = @{ Env = 'VCFOPS_USERNAME'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario', 'reset') }
+    AuthSource       = @{ Env = 'VCFOPS_AUTHSOURCE'; Type = 'module'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario', 'reset') }
+    Password         = @{ Env = 'VCFOPS_PASSWORD'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content', 'feed', 'scenario', 'reset') }
+    PasswordFile     = @{ Env = 'VCFOPS_PASSWORD_FILE'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content', 'feed', 'scenario', 'reset') }
+    SecretName       = @{ Env = 'VCFOPS_SECRET_NAME'; Type = 'module'; Commands = @('connect-test', 'seed', 'backfill', 'content', 'feed', 'scenario', 'reset') }
+    CredentialFile   = @{ Env = 'VCFOPS_CREDENTIAL_FILE'; Type = 'text'; Commands = @('config', 'connect-test', 'plan', 'seed', 'backfill', 'content', 'feed', 'scenario', 'reset') }
     AnonymisationKey = @{ Env = 'VCFOPS_SYNTH_ANON_KEY'; Type = 'module'; Commands = @('import') }
 }
 
@@ -438,7 +457,7 @@ function New-CliSeedPlan {
 
 function Get-CliSeededPlan {
     # Signs in, then the seed plan and the Operations ID of each planned object, for feed and scenario.
-    param($Config, $Inventory)
+    param($Config, $Inventory, [switch]$NoIds)
     $adapterName = if ($options.Adapter) { $options.Adapter } else { $Config.seed.adapterInstance }
     if (-not $adapterName) { throw 'No adapter instance. Set seed.adapterInstance in lab.json or pass -Adapter <name> (VCFOPS_SYNTH_ADAPTER).' }
     $rubricPath = if ($Config.seed.rubrics) { $Config.seed.rubrics } else { Join-Path $Config.paths.data 'rubrics' }
@@ -446,8 +465,8 @@ function Get-CliSeededPlan {
     $null = Connect-Cli -Config $Config
     $target = Resolve-SynthSeedTarget -Name $adapterName
     $plan = (New-CliSeedPlan -Config $Config -Inventory $Inventory -Rubrics $rubrics -Target $target).Plan
-    $ids = Resolve-SynthPlanId -Plan $plan -AdapterInstanceId $target.AdapterInstanceId
-    @{ Plan = $plan; Ids = $ids; Adapter = $adapterName }
+    $ids = if ($NoIds) { @{} } else { Resolve-SynthPlanId -Plan $plan -AdapterInstanceId $target.AdapterInstanceId }
+    @{ Plan = $plan; Ids = $ids; Adapter = $adapterName; Target = $target }
 }
 
 try {
@@ -780,6 +799,40 @@ try {
                 Disconnect-SynthOps -Confirm:$false
             }
             exit 0
+        }
+
+        'reset' {
+            $config = Get-CliConfig
+            $inventory = Get-SynthInventory -Path $config.paths.inventory
+            $report = -not $options.Force -or $options.DryRun
+            $failed = 0
+            try {
+                $seeded = Get-CliSeededPlan -Config $config -Inventory $inventory -NoIds
+                $tag = "$($config.seed.tag.category)-$($config.seed.tag.name)"
+                $found = @(Get-SynthSeededObject -Plan $seeded.Plan -AdapterInstanceId $seeded.Target.AdapterInstanceId -Tag $tag)
+                Write-Host "Reset under adapter instance $($seeded.Adapter): $($found.Count) of $(@($seeded.Plan.objects).Count) planned objects found, $(@($found | Where-Object Tagged).Count) with the $tag tag"
+                $results = @(Remove-SynthSeededObject -Object $found -WhatIf:$report -Confirm:$false)
+                foreach ($group in ($results | Group-Object Kind)) {
+                    $counts = ($group.Group | Group-Object Action | ForEach-Object { "$($_.Count) $($_.Name)" }) -join ', '
+                    Write-Host ('  {0,-32} {1}' -f $group.Name, $counts)
+                }
+                # Ids only: an untagged object's name may be a real one.
+                foreach ($r in @($results | Where-Object Action -eq 'untagged')) { Write-Host "  Left alone, no synthetic tag: $($r.Kind) $($r.Id)" }
+                foreach ($r in @($results | Where-Object Action -eq 'failed')) { $failed++; Write-Host "  Failed: $($r.Kind) $($r.Id): $($r.Error)" }
+                if ($options.IncludeContent) {
+                    foreach ($r in @(Remove-SynthContent -Prefix $config.prefix -WhatIf:$report -Confirm:$false)) {
+                        Write-Host ('  {0,-14} {1,-14} {2}' -f $r.Action, $r.Kind, $r.Name)
+                        if ($r.Error) { $failed++; Write-Host "    $($r.Error)" }
+                    }
+                    Write-Host "  Views and dashboards cannot be deleted through the API; delete the $($config.prefix) ones in the UI, or let the next content run overwrite them."
+                }
+                if ($report) { Write-Host 'Report only: nothing was deleted. Add -Force to delete.' }
+                else { Clear-SynthState -Path $config.paths.state -Confirm:$false }
+            }
+            finally {
+                Disconnect-SynthOps -Confirm:$false
+            }
+            exit $(if ($failed) { 1 } else { 0 })
         }
 
         { $planned.Contains($_) } {

@@ -16,7 +16,7 @@ Phases 0 to 4 are done: the image, CLI and Suite API sign-in, the RVTools and Li
 | `plan` | Dry run: what each stage would do | 1 |
 | `import` | RVTools export to inventory model | 2 |
 | `seed` | Create the estate in VCF Operations under a holder adapter instance of its own | 3 |
-| `reset` | Remove what the toolset created, found by tag and identifier | to come (8) |
+| `reset` | Remove the objects seed created (and, with `-IncludeContent`, the toolset's content) | 8 |
 | `backfill` | Push generated history for every numeric metric | 4 |
 | `content` | Custom groups, tier policies, symptoms, alerts and super metrics; dashboards to come | 5 and 6 (7 to come) |
 | `feed` | Live point every interval with analytics on, carrying on from the backfill | 6 |
@@ -101,7 +101,9 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-NoAnonymise` | `VCFOPS_SYNTH_NO_ANONYMISE` | import | Keep real names |
 | `-Adapter` | `VCFOPS_SYNTH_ADAPTER` | seed, backfill, feed, scenario | Holder adapter instance; default `seed.adapterInstance` (`vcfops-synth holder - do not start`) |
 | `-Refresh` | `VCFOPS_SYNTH_REFRESH` | seed | Push properties and stats to objects already there |
-| `-DryRun` | `VCFOPS_SYNTH_DRY_RUN` | seed, backfill, content, feed | Report only; change nothing |
+| `-DryRun` | `VCFOPS_SYNTH_DRY_RUN` | seed, backfill, content, feed, reset | Report only; change nothing |
+| `-Force` | `VCFOPS_SYNTH_FORCE` | reset | Delete for real |
+| `-IncludeContent` | `VCFOPS_SYNTH_INCLUDE_CONTENT` | reset | Also delete the prefixed content |
 | `-Days` | `VCFOPS_SYNTH_DAYS` | backfill | Days of history; default `backfillDays` |
 | `-Kinds` | `VCFOPS_SYNTH_KINDS` | backfill | Comma-separated resource kinds |
 | `-MaxVms` | `VCFOPS_SYNTH_MAX_VMS` | backfill | First n VMs only, for a pilot |
@@ -218,6 +220,17 @@ The alerts carry the tier thresholds themselves (through `vcfops-synth|tier`), s
 | Datastore latency | S3 | | read or write above 30 ms |
 
 Each alert has a recommendation. The super metrics are VM CPU demand over allocation, the worst VM CPU ready and disk latency in each cluster, and the average VM health in each tier group; a policy must enable them before Operations computes them.
+
+## Reset
+
+`reset` removes what seed created. It finds each planned object by kind and unique identifier, as seed does, never by name, and deletes it only when its `summary|tag` carries the synthetic tag (`seed.tag`, `vcfops-synth-synthetic` by default); an object with a matching identifier but no tag is listed by ID and left alone. VMs go first and the Physical Datacenter last. Afterwards it forgets the backfill progress, the feed's last push and the running scenarios, so a reseed starts clean.
+
+Without `-Force` it only reports what it would delete. `-IncludeContent` also deletes the policies (the tier policies before `Synth-Base`), alerts, symptoms, recommendations, super metrics and custom groups whose names start with the content prefix, `Synth-Estate` included. Views and dashboards cannot be deleted through the API, so delete those in the UI or let the next `content` run overwrite them.
+
+```bash
+pwsh ./bin/vcfops-synth.ps1 reset -ConfigPath ./config/lab.json                    # report only
+pwsh ./bin/vcfops-synth.ps1 reset -Force -IncludeContent -ConfigPath ./config/lab.json
+```
 
 ## Development
 
