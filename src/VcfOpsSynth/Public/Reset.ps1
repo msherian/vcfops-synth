@@ -211,15 +211,19 @@ function Save-SynthContentDeletePayload {
 
     .PARAMETER Path
         The JSON file to write.
+
+    .PARAMETER Owner
+        The user content imported the dashboards as; they are deleted for that user. Without it, for all users.
     #>
     [CmdletBinding(SupportsShouldProcess)]
     [OutputType([string])]
     param(
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Prefix,
-        [Parameter(Mandatory)][string]$Path
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Owner
     )
     $names = Get-SynthContentName -Prefix $Prefix
-    $payload = [ordered]@{ prefix = $Prefix; view = @($names.View); report = @($names.Report); dashboard = @($names.Dashboard) }
+    $payload = [ordered]@{ prefix = $Prefix; owner = $Owner; view = @($names.View); report = @($names.Report); dashboard = @($names.Dashboard) }
     if ($PSCmdlet.ShouldProcess($Path, 'Write content delete payload')) {
         $payload | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
     }
@@ -297,7 +301,8 @@ function Remove-SynthApplianceContent {
 
         All deletes run in one SSH session: bin/ops-content-delete.py and the
         names are sent with the command and run on the appliance, which applies
-        the same guards and deletes dashboards for all users. Sign-in tries the
+        the same guards and deletes dashboards for -Owner (for all users without
+        it). Sign-in tries the
         key first; if the appliance refuses it, ssh asks for the password on the
         terminal, once. The password never passes through PowerShell.
 
@@ -310,6 +315,9 @@ function Remove-SynthApplianceContent {
     .PARAMETER IdentityFile
         The private key; without it ssh uses its defaults.
 
+    .PARAMETER Owner
+        The user content imported the dashboards as; they are deleted for that user. Without it, for all users.
+
     .PARAMETER Script
         bin/ops-content-delete.py, which runs on the appliance.
     #>
@@ -319,11 +327,12 @@ function Remove-SynthApplianceContent {
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Prefix,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$SshTarget,
         [string]$IdentityFile,
+        [string]$Owner,
         [string]$Script = (Join-Path $PSScriptRoot '../../../bin/ops-content-delete.py')
     )
 
     $names = Get-SynthContentName -Prefix $Prefix
-    $send = [ordered]@{ prefix = $Prefix; view = @(); report = @(); dashboard = @() }
+    $send = [ordered]@{ prefix = $Prefix; owner = $Owner; view = @(); report = @(); dashboard = @() }
     $sent = [System.Collections.Generic.List[object]]::new()
     foreach ($kind in 'View', 'Report', 'Dashboard') {
         foreach ($name in $names.$kind) {

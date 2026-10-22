@@ -890,15 +890,17 @@ try {
                         if ($r.Error) { $failed++; Write-Host "    $($r.Error)" }
                     }
                     # The API cannot delete views, reports or dashboards; ops-cli on the appliance can, by name.
+                    # Dashboards belong to the user content imported them as.
+                    $owner = ([string]$config.operations.username) -replace '@.*$'
                     if ($options.ApplianceSsh) {
-                        foreach ($r in @(Remove-SynthApplianceContent -Prefix $config.prefix -SshTarget $options.ApplianceSsh -IdentityFile (Resolve-SynthSshKey -SshKey $options.SshKey) -WhatIf:$report -Confirm:$false)) {
+                        foreach ($r in @(Remove-SynthApplianceContent -Prefix $config.prefix -SshTarget $options.ApplianceSsh -IdentityFile (Resolve-SynthSshKey -SshKey $options.SshKey) -Owner $owner -WhatIf:$report -Confirm:$false)) {
                             Write-Host ('  {0,-14} {1,-14} {2}' -f $r.Action, $r.Kind, $r.Name)
                             if ($r.Error) { $failed++; Write-Host "    $($r.Error)" }
                         }
                     }
                     else {
                         $names = Get-SynthContentName -Prefix $config.prefix
-                        $payload = Save-SynthContentDeletePayload -Prefix $config.prefix -Path (Join-Path $config.paths.data 'content-delete.json') -Confirm:$false
+                        $payload = Save-SynthContentDeletePayload -Prefix $config.prefix -Path (Join-Path $config.paths.data 'content-delete.json') -Owner $owner -Confirm:$false
                         Write-Host '  Views, reports and dashboards cannot be deleted through the API. Add -ApplianceSsh to delete them with ops-cli, or delete these in the UI:'
                         foreach ($kind in 'View', 'Report', 'Dashboard') { foreach ($n in $names.$kind) { Write-Host ('    {0,-14} {1}' -f $kind.ToLowerInvariant(), $n) } }
                         Write-Host "  Or copy $payload and bin/ops-content-delete.py to the appliance and run there: `$VMWARE_PYTHON_BIN ops-content-delete.py content-delete.json --apply"

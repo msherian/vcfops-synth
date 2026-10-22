@@ -131,9 +131,16 @@ Describe 'Save-SynthContentDeletePayload' {
         $payload = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
         $names = Get-SynthContentName -Prefix 'Synth-'
         $payload.prefix | Should -Be 'Synth-'
+        $payload.owner | Should -BeNullOrEmpty
         $payload.view | Should -Be $names.View
         $payload.report | Should -Be $names.Report
         $payload.dashboard | Should -Be $names.Dashboard
+    }
+
+    It 'names the dashboard owner when given' {
+        $path = Join-Path $TestDrive 'owner.json'
+        $null = Save-SynthContentDeletePayload -Prefix 'Synth-' -Path $path -Owner 'opsadmin'
+        (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).owner | Should -Be 'opsadmin'
     }
 
     It 'writes nothing with -WhatIf' {
@@ -178,11 +185,18 @@ Describe 'Remove-SynthApplianceContent' {
         ($out | Where-Object Name -eq 'Synth-Service tiers').Kind | Should -Be 'dashboard'
     }
 
+    It 'sends the dashboard owner with the names' {
+        $null = Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -Owner 'opsadmin' -Confirm:$false
+        $b64 = [regex]::Matches($script:ssh[0].Command, 'echo (\S+) \| base64 -d')[1].Groups[1].Value
+        ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64)) | ConvertFrom-Json).owner | Should -Be 'opsadmin'
+    }
+
     It 'sends the appliance script itself, with Unix line endings' {
         $null = Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -Confirm:$false
         $b64 = [regex]::Matches($script:ssh[0].Command, 'echo (\S+) \| base64 -d')[0].Groups[1].Value
         $code = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
         $code | Should -BeLike '*def refusal(prefix, name)*'
+        $code | Should -BeLike '*def missing_jar_options(opscli_dir)*'
         $code | Should -Not -Match "`r"
     }
 
