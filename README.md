@@ -30,9 +30,9 @@ mkdir -p config data
 cp config/lab.example.json config/lab.json      # then set operations.fqdn for your lab
 export VCFOPS_PASSWORD='...'                     # never stored in lab.json
 
-docker run --rm -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
   ghcr.io/msherian/vcfops-synth config
-docker run --rm -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
   ghcr.io/msherian/vcfops-synth connect-test
 ```
 
@@ -42,9 +42,11 @@ Then import an RVTools export (xlsx, or a folder of its CSV files) into the inve
 cp config/tiering.example.json config/tiering.json   # then edit the rules for this estate
 cp ~/Downloads/RVTools_export_all.xlsx data/rvtools.xlsx
 
-docker run --rm -v "$PWD/config:/config" -v "$PWD/data:/data" ghcr.io/msherian/vcfops-synth import
-docker run --rm -v "$PWD/config:/config" -v "$PWD/data:/data" ghcr.io/msherian/vcfops-synth plan
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" ghcr.io/msherian/vcfops-synth import
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" ghcr.io/msherian/vcfops-synth plan
 ```
+
+`--user` lets the container write to a `data/` folder you own on a Linux host. Signing in with the VCF installer credentials file, seeding and backfilling from the container, and resuming a stopped run are in [docs/runbook.md](docs/runbook.md#running-from-the-container).
 
 The FQDN in `lab.example.json` is a placeholder in Holodeck's `site-a.vcf.lab` domain; use the name of your VCF Operations instance.
 
@@ -128,7 +130,7 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 ```bash
 pwsh ./bin/vcfops-synth.ps1 backfill -Kinds VirtualMachine -MaxVms 25 -ConfigPath ./config/lab.json
 pwsh ./bin/vcfops-synth.ps1 backfill -CredentialFile ~/Documents/vcf-installer-creds.json -ConfigPath ./config/lab.json
-docker run --rm -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
   -e VCFOPS_SYNTH_COMMAND=seed -e VCFOPS_SYNTH_DRY_RUN=true ghcr.io/msherian/vcfops-synth
 ```
 ## Seeding
