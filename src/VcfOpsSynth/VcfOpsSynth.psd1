@@ -54,6 +54,7 @@
         'Get-SynthContentName'
         'Save-SynthContentDeletePayload'
         'Remove-SynthApplianceContent'
+        'Resolve-SynthSshKey'
         'Clear-SynthState'
         'Get-SynthContentId'
         'Get-SynthViewContent'

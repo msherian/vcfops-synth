@@ -107,7 +107,7 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-Force` | `VCFOPS_SYNTH_FORCE` | reset | Delete for real |
 | `-IncludeContent` | `VCFOPS_SYNTH_INCLUDE_CONTENT` | reset | Also delete the prefixed content |
 | `-ApplianceSsh` | `VCFOPS_SYNTH_APPLIANCE_SSH` | reset | `user@host` of the Operations appliance; with `-IncludeContent`, delete the views, reports and dashboards with ops-cli (key first, else ssh asks for the password) |
-| `-SshKey` | `VCFOPS_SYNTH_SSH_KEY` | reset | Private key for `-ApplianceSsh`; default ssh's own |
+| `-SshKey` | `VCFOPS_SYNTH_SSH_KEY` | reset | Private key for `-ApplianceSsh`; default `/keys/id_ssh` when that file exists (the container's read-only key mount), else ssh's own |
 | `-ImportField` | `VCFOPS_SYNTH_IMPORT_FIELD` | content | Multipart field the content bundle is sent in; default `contentFile` |
 | `-Days` | `VCFOPS_SYNTH_DAYS` | backfill | Days of history; default `backfillDays` |
 | `-Kinds` | `VCFOPS_SYNTH_KINDS` | backfill | Comma-separated resource kinds |

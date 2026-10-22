@@ -187,12 +187,22 @@ Describe 'Remove-SynthApplianceContent' {
     }
 
     It 'falls back to a password prompt from ssh when the key is refused' {
+        Mock -ModuleName VcfOpsSynth Test-SynthTerminal { $true }
         $script:refuseKey = $true
         $out = @(Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -Confirm:$false)
         $script:ssh.Count | Should -Be 2
         $script:ssh[0].Interactive | Should -BeFalse
         $script:ssh[1].Interactive | Should -BeTrue
         @($out | Where-Object Action -eq 'deleted').Count | Should -Be 7
+    }
+
+    It 'fails clearly, without a prompt, when the key is refused and there is no terminal' {
+        Mock -ModuleName VcfOpsSynth Test-SynthTerminal { $false }
+        $script:refuseKey = $true
+        $out = @(Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -Confirm:$false)
+        $script:ssh.Count | Should -Be 1
+        @($out | Where-Object Action -eq 'failed').Count | Should -Be 9
+        $out[0].Error | Should -BeLike '*no terminal to ask for the password. Run the container with -it, or with -dit and then docker attach*'
     }
 
     It 'marks every item failed when the appliance gives no result' {
@@ -214,5 +224,26 @@ Describe 'Remove-SynthApplianceContent' {
         $out = @(Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -WhatIf)
         $script:ssh.Count | Should -Be 0
         @($out | Where-Object Action -eq 'would delete').Count | Should -Be 9
+    }
+}
+
+Describe 'Resolve-SynthSshKey' {
+    It 'takes the key given' {
+        Resolve-SynthSshKey -SshKey '/home/me/.ssh/id_ed25519' -Default (Join-Path $TestDrive 'none') | Should -Be '/home/me/.ssh/id_ed25519'
+    }
+
+    It 'takes the key mount when it holds a file' {
+        $mount = Join-Path $TestDrive 'id_ssh'; Set-Content -LiteralPath $mount -Value 'key'
+        Resolve-SynthSshKey -Default $mount | Should -Be $mount
+        Resolve-SynthSshKey -SshKey '' -Default $mount | Should -Be $mount
+    }
+
+    It 'leaves the choice to ssh when there is neither' {
+        Resolve-SynthSshKey -Default (Join-Path $TestDrive 'missing') | Should -BeNullOrEmpty
+    }
+
+    It 'defaults to /keys/id_ssh' {
+        $ast = (Get-Command Resolve-SynthSshKey).ScriptBlock.Ast
+        $ast.Body.ParamBlock.Parameters.Where({ $_.Name.VariablePath.UserPath -eq 'Default' })[0].DefaultValue.Value | Should -Be '/keys/id_ssh'
     }
 }

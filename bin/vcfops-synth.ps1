@@ -131,7 +131,8 @@
                                           and writes <data>/content-delete.json for bin/ops-content-delete.py
                           -ApplianceSsh   user@host of the Operations appliance; key first, else ssh asks for the password
                                           (VCFOPS_SYNTH_APPLIANCE_SSH)
-                          -SshKey         private key for -ApplianceSsh (VCFOPS_SYNTH_SSH_KEY; default ssh's own)
+                          -SshKey         private key for -ApplianceSsh (VCFOPS_SYNTH_SSH_KEY; default /keys/id_ssh if it exists,
+                                          else ssh's own)
                           -DryRun         report only, even with -Force (VCFOPS_SYNTH_DRY_RUN)
                           -Adapter        holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
 
@@ -180,7 +181,8 @@
     views, reports and dashboards with ops-cli, in one SSH session; if the key is refused, ssh asks for the password on the terminal. VCFOPS_SYNTH_APPLIANCE_SSH.
 
 .PARAMETER SshKey
-    reset: the private key for -ApplianceSsh. VCFOPS_SYNTH_SSH_KEY.
+    reset: the private key for -ApplianceSsh; default /keys/id_ssh when that file exists (the container's key mount).
+    VCFOPS_SYNTH_SSH_KEY.
 
 .PARAMETER ImportField
     content: the multipart field name for the content bundle import. VCFOPS_SYNTH_IMPORT_FIELD.
@@ -889,7 +891,7 @@ try {
                     }
                     # The API cannot delete views, reports or dashboards; ops-cli on the appliance can, by name.
                     if ($options.ApplianceSsh) {
-                        foreach ($r in @(Remove-SynthApplianceContent -Prefix $config.prefix -SshTarget $options.ApplianceSsh -IdentityFile $options.SshKey -WhatIf:$report -Confirm:$false)) {
+                        foreach ($r in @(Remove-SynthApplianceContent -Prefix $config.prefix -SshTarget $options.ApplianceSsh -IdentityFile (Resolve-SynthSshKey -SshKey $options.SshKey) -WhatIf:$report -Confirm:$false)) {
                             Write-Host ('  {0,-14} {1,-14} {2}' -f $r.Action, $r.Kind, $r.Name)
                             if ($r.Error) { $failed++; Write-Host "    $($r.Error)" }
                         }

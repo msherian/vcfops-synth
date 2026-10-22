@@ -252,6 +252,37 @@ function Invoke-SynthSsh {
     [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = (@($output | ForEach-Object { "$_" }) -join "`n").Trim() }
 }
 
+function Test-SynthTerminal {
+    <#
+    .SYNOPSIS
+        True when ssh can ask for a password: a console on Windows, a /dev/tty that opens elsewhere (docker run -t).
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+    if ($IsWindows) { return -not [Console]::IsInputRedirected }
+    try { [IO.File]::Open('/dev/tty', 'Open', 'ReadWrite').Dispose(); $true } catch { $false }
+}
+
+function Resolve-SynthSshKey {
+    <#
+    .SYNOPSIS
+        The private key for -ApplianceSsh: the one given, else the container's key mount when it holds a file.
+
+    .PARAMETER SshKey
+        -SshKey or VCFOPS_SYNTH_SSH_KEY.
+
+    .PARAMETER Default
+        The key mount (docker run -v ~/.ssh/id_ed25519:/keys/id_ssh:ro).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string]$SshKey, [string]$Default = '/keys/id_ssh')
+    if ($SshKey) { return $SshKey }
+    if (Test-Path -LiteralPath $Default -PathType Leaf) { return $Default }
+    $null
+}
+
 function Remove-SynthApplianceContent {
     <#
     .SYNOPSIS
@@ -313,9 +344,15 @@ function Remove-SynthApplianceContent {
     $command = ". /etc/profile >/dev/null 2>&1; t=`$(mktemp -d) && echo $code | base64 -d > `$t/d.py && echo $payload | base64 -d > `$t/p.json && `${VMWARE_PYTHON_BIN:-python3} `$t/d.py `$t/p.json --apply --jsonl; rc=`$?; rm -rf `$t; exit `$rc"
 
     $run = Invoke-SynthSsh -Target $SshTarget -IdentityFile $IdentityFile -Command $command
-    # No usable key: let ssh ask for the password on the terminal.
+    # No usable key: let ssh ask for the password on the terminal, if there is one.
     if ($run.ExitCode -eq 255 -and $run.Output -match 'Permission denied') {
-        $run = Invoke-SynthSsh -Target $SshTarget -IdentityFile $IdentityFile -Command $command -Interactive
+        if (-not (Test-SynthTerminal)) {
+            $run = [pscustomobject]@{ ExitCode = 255; Output = "$SshTarget did not accept the SSH key, and there is no terminal to ask for the password. Run the container with -it, or with -dit and then docker attach <name>." }
+        }
+        else {
+            Write-Host "SSH key not accepted by $SshTarget; ssh asks for the appliance password. If the container is detached: docker attach <name> (detach again with Ctrl-P Ctrl-Q)."
+            $run = Invoke-SynthSsh -Target $SshTarget -IdentityFile $IdentityFile -Command $command -Interactive
+        }
     }
     $byName = @{}
     foreach ($line in ($run.Output -split "`n")) {

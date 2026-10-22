@@ -102,11 +102,22 @@ docker run "${opts[@]}" "$img" scenario -Stop all
 ```bash
 docker run "${opts[@]}" "$img" reset                          # report only
 docker run "${opts[@]}" "$img" reset -Force -IncludeContent
-# Views, reports and dashboards too: mount a key the appliance trusts (readable by uid 999).
-docker run "${opts[@]}" -v "$HOME/.ssh/id_ed25519:/keys/id:ro" "$img" reset -Force -IncludeContent -ApplianceSsh root@<ops appliance> -SshKey /keys/id
-# Without a trusted key, run with -it so ssh can ask for the password on the terminal.
+# Views, reports and dashboards too. A key the appliance trusts, mounted read-only at /keys/id_ssh, is used without -SshKey.
+docker run "${opts[@]}" -v "$HOME/.ssh/id_ed25519:/keys/id_ssh:ro" "$img" reset -Force -IncludeContent -ApplianceSsh root@<ops appliance>
+# No trusted key: run in the foreground with -it, and ssh asks for the appliance password.
 docker run -it "${opts[@]}" "$img" reset -Force -IncludeContent -ApplianceSsh root@<ops appliance>
 docker rm -f synth-feed
+```
+
+The key must be readable by the container's user: the `--user` in `opts`, or uid 999 without it. ssh accepts a mounted key whatever its mode when another uid owns it, and the entry point gives a `--user` uid the image does not know a passwd entry, so ssh runs under it.
+
+When the appliance refuses the key, reset prints `SSH key not accepted by ...` and ssh asks for the password on the container's terminal, once; the password never passes through the toolset. That needs a terminal: with `docker run -d` and no `-t`, reset stops with a message saying so instead of waiting. A detached run can still take the password:
+
+```bash
+docker run -dit --name synth-reset "${opts[@]}" "$img" reset -Force -IncludeContent -ApplianceSsh root@<ops appliance>
+docker attach synth-reset      # answer the password prompt; Ctrl-P Ctrl-Q detaches again
+docker logs synth-reset        # the results, once it has finished
+docker rm synth-reset
 ```
 
 ### Name resolution
