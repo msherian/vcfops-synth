@@ -106,6 +106,8 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-DryRun` | `VCFOPS_SYNTH_DRY_RUN` | seed, backfill, content, feed, reset | Report only; change nothing |
 | `-Force` | `VCFOPS_SYNTH_FORCE` | reset | Delete for real |
 | `-IncludeContent` | `VCFOPS_SYNTH_INCLUDE_CONTENT` | reset | Also delete the prefixed content |
+| `-ApplianceSsh` | `VCFOPS_SYNTH_APPLIANCE_SSH` | reset | `user@host` of the Operations appliance; with `-IncludeContent`, delete the views, reports and dashboards with ops-cli (key sign-in only) |
+| `-SshKey` | `VCFOPS_SYNTH_SSH_KEY` | reset | Private key for `-ApplianceSsh`; default ssh's own |
 | `-ImportField` | `VCFOPS_SYNTH_IMPORT_FIELD` | content | Multipart field the content bundle is sent in; default `contentFile` |
 | `-Days` | `VCFOPS_SYNTH_DAYS` | backfill | Days of history; default `backfillDays` |
 | `-Kinds` | `VCFOPS_SYNTH_KINDS` | backfill | Comma-separated resource kinds |
@@ -254,11 +256,11 @@ Each widget shows its view on the `Synth-Estate` group, so it lists the seeded o
 
 `reset` removes what seed created. It finds each planned object by kind and unique identifier, as seed does, never by name, and deletes it only when its `summary|tag` carries the synthetic tag (`seed.tag`, `vcfops-synth-synthetic` by default); an object with a matching identifier but no tag is listed by ID and left alone. VMs go first and the Physical Datacenter last. Afterwards it forgets the backfill progress, the feed's last push and the running scenarios, so a reseed starts clean.
 
-Without `-Force` it only reports what it would delete. `-IncludeContent` also deletes the policies (the tier policies before `Synth-Base`), alerts, symptoms, recommendations, super metrics and custom groups whose names start with the content prefix, `Synth-Estate` included. Views and dashboards cannot be deleted through the API, so delete those in the UI or let the next `content` run overwrite them.
+Without `-Force` it only reports what it would delete. `-IncludeContent` also deletes the policies (the tier policies before `Synth-Base`), alerts, symptoms, recommendations, super metrics and custom groups whose names start with the content prefix, `Synth-Estate` included. Views, reports and dashboards cannot be deleted through the API. Add `-ApplianceSsh root@<ops appliance>` and reset signs in to the appliance with an SSH key (never a password) and deletes each of them with `ops-cli`, by the exact names `content` gives them: dashboards for all users, and never ops-cli's `-all`, which would delete the built-in ones too. Without `-ApplianceSsh`, reset lists them to delete in the UI. An item already gone shows as `not there`.
 
 ```bash
 pwsh ./bin/vcfops-synth.ps1 reset -ConfigPath ./config/lab.json                    # report only
-pwsh ./bin/vcfops-synth.ps1 reset -Force -IncludeContent -ConfigPath ./config/lab.json
+pwsh ./bin/vcfops-synth.ps1 reset -Force -IncludeContent -ApplianceSsh root@ops-a.site-a.example -ConfigPath ./config/lab.json
 ```
 
 ## Development

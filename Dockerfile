@@ -17,8 +17,9 @@ LABEL org.opencontainers.image.title="vcfops-synth" \
       org.opencontainers.image.revision="${REVISION}"
 
 # tzdata: the base image has no time zone database, and history follows the lab's local business hours.
+# openssh-client: reset -ApplianceSsh runs ops-cli on the Operations appliance.
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata openssh-client \
  && rm -rf /var/lib/apt/lists/*
 
 # Modules go in the all-users scope so the unprivileged runtime user can load them.

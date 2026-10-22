@@ -112,3 +112,58 @@ Describe 'Clear-SynthState' {
         { Clear-SynthState -Path (Join-Path $TestDrive 'none.json') -Confirm:$false } | Should -Not -Throw
     }
 }
+
+Describe 'Get-SynthContentName' {
+    It 'names every view, report and dashboard content publishes, all with the prefix' {
+        $names = Get-SynthContentName -Prefix 'Synth-'
+        $names.View.Count | Should -Be 5
+        $names.Report.Count | Should -Be 2
+        $names.Dashboard.Count | Should -Be 2
+        @($names.View + $names.Report + $names.Dashboard | Where-Object { -not $_.StartsWith('Synth-') }).Count | Should -Be 0
+        $names.Dashboard | Should -Contain 'Synth-Service tiers'
+    }
+}
+
+Describe 'Remove-SynthApplianceContent' {
+    BeforeEach {
+        $script:ssh = [System.Collections.Generic.List[object]]::new()
+        Mock -ModuleName VcfOpsSynth Invoke-SynthSsh {
+            $script:ssh.Add([pscustomobject]@{ Target = $Target; Command = $Command; IdentityFile = $IdentityFile })
+            if ($Command -like "*report delete 'Synth-Rightsizing'") { return [pscustomobject]@{ ExitCode = 1; Output = 'Report Synth-Rightsizing not found' } }
+            if ($Command -like "*dashboard delete all 'Synth-Service tiers'") { return [pscustomobject]@{ ExitCode = 0; Output = 'Error: permission denied' } }
+            [pscustomobject]@{ ExitCode = 0; Output = 'Deleted' }
+        }
+    }
+
+    It 'deletes each named item with ops-cli: views, then reports, then dashboards for all users' {
+        $out = @(Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -IdentityFile '/keys/id' -Confirm:$false)
+        $script:ssh.Count | Should -Be 9
+        @($script:ssh | Where-Object Target -ne 'root@ops.example.invalid').Count | Should -Be 0
+        $script:ssh[0].IdentityFile | Should -Be '/keys/id'
+        $script:ssh[0].Command | Should -BeLike "*ops-cli.py view delete 'Synth-*'"
+        @($script:ssh | Where-Object Command -like '*dashboard delete all *').Count | Should -Be 2
+        @($script:ssh | Where-Object Command -match '-all').Count | Should -Be 0
+        @($out | Where-Object Action -eq 'deleted').Count | Should -Be 7
+        ($out | Where-Object Name -eq 'Synth-Rightsizing').Action | Should -Be 'not there'
+        ($out | Where-Object Name -eq 'Synth-Service tiers').Action | Should -Be 'failed'
+    }
+
+    It 'quotes a name with a single quote for the remote shell' {
+        $null = Remove-SynthApplianceContent -Prefix "Lab's " -SshTarget 'root@ops.example.invalid' -Confirm:$false
+        $script:ssh[0].Command | Should -BeLike "*view delete 'Lab'\''s *'"
+    }
+
+    It 'refuses a prefix that would make a name with a comma or a leading dash' {
+        $out = @(Remove-SynthApplianceContent -Prefix 'A,B-' -SshTarget 'root@ops.example.invalid' -Confirm:$false)
+        $script:ssh.Count | Should -Be 0
+        @($out | Where-Object Action -ne 'refused').Count | Should -Be 0
+        $out = @(Remove-SynthApplianceContent -Prefix '-all ' -SshTarget 'root@ops.example.invalid' -Confirm:$false)
+        $script:ssh.Count | Should -Be 0
+    }
+
+    It 'signs in to nothing with -WhatIf' {
+        $out = @(Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -WhatIf)
+        $script:ssh.Count | Should -Be 0
+        @($out | Where-Object Action -eq 'would delete').Count | Should -Be 9
+    }
+}

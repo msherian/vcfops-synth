@@ -51,6 +51,8 @@
         'Get-SynthSeededObject'
         'Remove-SynthSeededObject'
         'Remove-SynthContent'
+        'Get-SynthContentName'
+        'Remove-SynthApplianceContent'
         'Clear-SynthState'
         'Get-SynthContentId'
         'Get-SynthViewContent'

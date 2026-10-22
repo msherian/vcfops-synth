@@ -125,8 +125,12 @@
                           feed and scenario state. Reports only, unless -Force is given.
                           -Force          delete for real (VCFOPS_SYNTH_FORCE)
                           -IncludeContent also delete the prefixed policies, alerts, symptoms, recommendations,
-                                          super metrics and custom groups; views and dashboards stay
-                                          (VCFOPS_SYNTH_INCLUDE_CONTENT)
+                                          super metrics and custom groups (VCFOPS_SYNTH_INCLUDE_CONTENT); with
+                                          -ApplianceSsh also the views, reports and dashboards, by exact name with
+                                          ops-cli on the appliance; without it, lists them to delete in the UI
+                          -ApplianceSsh   user@host of the Operations appliance, key sign-in only
+                                          (VCFOPS_SYNTH_APPLIANCE_SSH)
+                          -SshKey         private key for -ApplianceSsh (VCFOPS_SYNTH_SSH_KEY; default ssh's own)
                           -DryRun         report only, even with -Force (VCFOPS_SYNTH_DRY_RUN)
                           -Adapter        holder adapter instance (VCFOPS_SYNTH_ADAPTER; default seed.adapterInstance)
 
@@ -169,6 +173,13 @@
 .PARAMETER IncludeContent
     reset: also delete the prefixed policies, alerts, symptoms, recommendations, super metrics and custom groups.
     VCFOPS_SYNTH_INCLUDE_CONTENT.
+
+.PARAMETER ApplianceSsh
+    reset -IncludeContent: user@host of the VCF Operations appliance; reset signs in with a key and deletes the
+    views, reports and dashboards with ops-cli. VCFOPS_SYNTH_APPLIANCE_SSH.
+
+.PARAMETER SshKey
+    reset: the private key for -ApplianceSsh. VCFOPS_SYNTH_SSH_KEY.
 
 .PARAMETER ImportField
     content: the multipart field name for the content bundle import. VCFOPS_SYNTH_IMPORT_FIELD.
@@ -277,6 +288,8 @@ param(
     [switch]$DryRun,
     [switch]$Force,
     [switch]$IncludeContent,
+    [string]$ApplianceSsh,
+    [string]$SshKey,
     [string]$ImportField,
 
     # Numbers are taken as text and checked here, so a bad value is exit code 2, not a binding failure.
@@ -328,6 +341,8 @@ $optionSpec = [ordered]@{
     Refresh     = @{ Env = 'VCFOPS_SYNTH_REFRESH'; Type = 'switch'; Commands = @('seed') }
     Force       = @{ Env = 'VCFOPS_SYNTH_FORCE'; Type = 'switch'; Commands = @('reset') }
     IncludeContent = @{ Env = 'VCFOPS_SYNTH_INCLUDE_CONTENT'; Type = 'switch'; Commands = @('reset') }
+    ApplianceSsh = @{ Env = 'VCFOPS_SYNTH_APPLIANCE_SSH'; Type = 'text'; Commands = @('reset') }
+    SshKey      = @{ Env = 'VCFOPS_SYNTH_SSH_KEY'; Type = 'text'; Commands = @('reset') }
     ImportField = @{ Env = 'VCFOPS_SYNTH_IMPORT_FIELD'; Type = 'text'; Commands = @('content') }
     DryRun      = @{ Env = 'VCFOPS_SYNTH_DRY_RUN'; Type = 'switch'; Commands = @('seed', 'backfill', 'content', 'feed', 'reset') }
     Days        = @{ Env = 'VCFOPS_SYNTH_DAYS'; Type = 'count'; Commands = @('backfill') }
@@ -871,7 +886,18 @@ try {
                         Write-Host ('  {0,-14} {1,-14} {2}' -f $r.Action, $r.Kind, $r.Name)
                         if ($r.Error) { $failed++; Write-Host "    $($r.Error)" }
                     }
-                    Write-Host "  Views and dashboards cannot be deleted through the API; delete the $($config.prefix) ones in the UI, or let the next content run overwrite them."
+                    # The API cannot delete views, reports or dashboards; ops-cli on the appliance can, by name.
+                    if ($options.ApplianceSsh) {
+                        foreach ($r in @(Remove-SynthApplianceContent -Prefix $config.prefix -SshTarget $options.ApplianceSsh -IdentityFile $options.SshKey -WhatIf:$report -Confirm:$false)) {
+                            Write-Host ('  {0,-14} {1,-14} {2}' -f $r.Action, $r.Kind, $r.Name)
+                            if ($r.Error) { $failed++; Write-Host "    $($r.Error)" }
+                        }
+                    }
+                    else {
+                        $names = Get-SynthContentName -Prefix $config.prefix
+                        Write-Host '  Views, reports and dashboards cannot be deleted through the API. Add -ApplianceSsh to delete them with ops-cli, or delete these in the UI:'
+                        foreach ($kind in 'View', 'Report', 'Dashboard') { foreach ($n in $names.$kind) { Write-Host ('    {0,-14} {1}' -f $kind.ToLowerInvariant(), $n) } }
+                    }
                 }
                 if ($report) { Write-Host 'Report only: nothing was deleted. Add -Force to delete.' }
                 else { Clear-SynthState -Path $config.paths.state -Confirm:$false }

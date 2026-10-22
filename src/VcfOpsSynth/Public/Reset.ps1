@@ -117,8 +117,8 @@ function Remove-SynthContent {
         groups; the tier policies go before <prefix>Base, which they inherit.
         Alerts go next, since they refer to symptoms and recommendations.
         Only items whose names (a recommendation's text) start with the prefix
-        are touched. Views and dashboards cannot be listed or deleted through
-        the API, so they stay; the next content run overwrites them by name.
+        are touched. Views, reports and dashboards cannot be deleted through
+        the API; Remove-SynthApplianceContent deletes them with ops-cli.
 
     .PARAMETER Prefix
         The content prefix (lab.json prefix). It must not be empty.
@@ -169,5 +169,108 @@ function Clear-SynthState {
         $temp = "$Path.tmp"
         $all | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $temp -Encoding utf8
         Move-Item -LiteralPath $temp -Destination $Path -Force
+    }
+}
+
+function Get-SynthContentName {
+    <#
+    .SYNOPSIS
+        The names of the views, reports and dashboards the content command publishes.
+
+    .DESCRIPTION
+        Built from the same definitions content uses, so reset can delete them by
+        exact name: neither the API nor ops-cli can list them.
+
+    .PARAMETER Prefix
+        The content prefix (lab.json prefix).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Prefix)
+
+    $content = Get-SynthViewContent -Prefix $Prefix
+    [pscustomobject]@{
+        View      = @($content.Views | ForEach-Object { [string]$_.Name })
+        Report    = @($content.Reports | ForEach-Object { [string]$_.Name })
+        Dashboard = @(Get-SynthDashboardContent -Prefix $Prefix | ForEach-Object { [string]$_.Name })
+    }
+}
+
+function Invoke-SynthSsh {
+    <#
+    .SYNOPSIS
+        Runs one command on a host over SSH with key authentication only, and returns its exit code and output.
+
+    .DESCRIPTION
+        BatchMode stops ssh asking for a password, so a missing key fails at once
+        instead of hanging. A host seen for the first time is added to known_hosts.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$Command,
+        [string]$IdentityFile
+    )
+    $sshArgs = @('-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=15')
+    if ($IdentityFile) { $sshArgs += @('-i', $IdentityFile) }
+    $output = & ssh @sshArgs $Target $Command 2>&1
+    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = (@($output | ForEach-Object { "$_" }) -join "`n").Trim() }
+}
+
+function Remove-SynthApplianceContent {
+    <#
+    .SYNOPSIS
+        Deletes the toolset's views, reports and dashboards on the VCF Operations appliance with ops-cli, over SSH.
+
+    .DESCRIPTION
+        The API cannot delete views, dashboards or report definitions, but ops-cli
+        on the appliance can, by exact name. Each name comes from the toolset's own
+        definitions (Get-SynthContentName) and must start with the prefix. A name
+        that is empty, starts with '-' (ops-cli's -all deletes every item, the
+        built-in ones too) or holds a comma (ops-cli's name separator) is refused.
+        Dashboards are deleted for all users. Signs in with a key only, never a
+        password.
+
+    .PARAMETER Prefix
+        The content prefix (lab.json prefix). It must not be empty.
+
+    .PARAMETER SshTarget
+        user@host of the appliance, for example root@ops-a.example.local.
+
+    .PARAMETER IdentityFile
+        The private key; without it ssh uses its defaults.
+
+    .PARAMETER OpsCli
+        The remote command that runs ops-cli, before its arguments.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Prefix,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$SshTarget,
+        [string]$IdentityFile,
+        [string]$OpsCli = '. /etc/profile >/dev/null 2>&1; cd /usr/lib/vmware-vcops/tools/opscli && $VMWARE_PYTHON_BIN ./ops-cli.py'
+    )
+
+    $names = Get-SynthContentName -Prefix $Prefix
+    $quote = { param($s) "'" + $s.Replace("'", "'\''") + "'" }
+    $items = @(
+        foreach ($n in $names.View) { @{ Kind = 'view'; Name = $n; Args = "view delete $(& $quote $n)" } }
+        foreach ($n in $names.Report) { @{ Kind = 'report'; Name = $n; Args = "report delete $(& $quote $n)" } }
+        foreach ($n in $names.Dashboard) { @{ Kind = 'dashboard'; Name = $n; Args = "dashboard delete all $(& $quote $n)" } }
+    )
+    foreach ($item in $items) {
+        $result = [pscustomobject]@{ Kind = $item.Kind; Name = $item.Name; Action = ''; Error = $null }
+        if (-not $item.Name.StartsWith($Prefix, [StringComparison]::Ordinal) -or $item.Name.StartsWith('-') -or $item.Name.Contains(',')) {
+            $result.Action = 'refused'; $result.Error = 'The name must start with the prefix and hold no comma.'; $result; continue
+        }
+        if (-not $PSCmdlet.ShouldProcess($item.Name, "Delete $($item.Kind) with ops-cli on $SshTarget")) { $result.Action = 'would delete'; $result; continue }
+        $run = Invoke-SynthSsh -Target $SshTarget -IdentityFile $IdentityFile -Command "$OpsCli $($item.Args)"
+        # An item already gone counts as done, so a second reset runs clean.
+        if ($run.Output -match '(?i)not (found|exist)|does ?n.t exist|no such') { $result.Action = 'not there' }
+        elseif ($run.ExitCode -eq 0 -and $run.Output -notmatch '(?i)\b(error|fail(ed|ure)?|exception)\b') { $result.Action = 'deleted' }
+        else { $result.Action = 'failed'; $result.Error = "exit $($run.ExitCode): $($run.Output)" }
+        $result
     }
 }
