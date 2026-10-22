@@ -222,6 +222,171 @@ function ConvertTo-SynthReportXml {
     @{ Id = $id; Xml = $xml; Properties = @("report.$id.title=$($Definition.Name)", "report.$id.desc=$($Definition.Description)") }
 }
 
+function Get-SynthDashboardContent {
+    <#
+    .SYNOPSIS
+        The dashboards the toolset publishes: each a grid of View widgets showing its list views.
+
+    .DESCRIPTION
+        Service tiers: the VM tier list above the cluster tier pressure view.
+        Rightsizing and hygiene: oversized and undersized VMs side by side, the VM
+        configuration hygiene view below. Every widget shows its view on the
+        estate group (Synth-Estate), so it lists the seeded objects only.
+
+        Widget coordinates are on a 12-column grid, from 1: X and Y place the
+        top left corner, W and H give the size.
+
+    .PARAMETER Prefix
+        The content prefix (lab.json prefix).
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable[]])]
+    param([string]$Prefix = 'Synth-')
+
+    $w = { param($view, $x, $y, $width, $height) @{ View = "$Prefix$view"; X = $x; Y = $y; W = $width; H = $height } }
+    @(
+        @{ Name = "${Prefix}Service tiers"
+            Description = 'Each seeded VM against its service tier, and the clusters under the most pressure, over the last week.'
+            Widgets = @(
+                (& $w 'VM tier list' 1 1 12 8)
+                (& $w 'Cluster tier pressure' 1 9 12 6)
+            ) }
+        @{ Name = "${Prefix}Rightsizing and hygiene"
+            Description = 'Oversized VMs to reclaim from, undersized VMs to grow, and VMs that drift from the build standard.'
+            Widgets = @(
+                (& $w 'Oversized VMs' 1 1 6 8)
+                (& $w 'Undersized VMs' 7 1 6 8)
+                (& $w 'VM configuration hygiene' 1 9 12 8)
+            ) }
+    )
+}
+
+function ConvertTo-SynthResourceKindId {
+    <#
+    .SYNOPSIS
+        A resource kind as dashboard widgets name it: '002', the adapter kind's length in three digits, the adapter kind, then the resource kind.
+
+    .EXAMPLE
+        ConvertTo-SynthResourceKindId -AdapterKind 'Container' -ResourceKind 'Environment'   # 002009ContainerEnvironment
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$AdapterKind,
+        [Parameter(Mandatory)][string]$ResourceKind
+    )
+
+    '002{0:D3}{1}{2}' -f $AdapterKind.Length, $AdapterKind, $ResourceKind
+}
+
+function ConvertTo-SynthDashboard {
+    <#
+    .SYNOPSIS
+        One dashboard as an entry of dashboard.json's dashboards array, in the shape of a VCF Operations 9.1.1 content export.
+
+    .DESCRIPTION
+        Each widget is a View widget that shows its view on the given resource
+        (the estate group). The dashboard, its widgets and the views they show
+        all have stable ids (Get-SynthContentId), so a re-import overwrites them.
+
+    .PARAMETER Definition
+        A dashboard from Get-SynthDashboardContent.
+
+    .PARAMETER OwnerId
+        The id of the Operations user who owns the dashboard.
+
+    .PARAMETER ResourceId
+        The id of the resource the widgets show their views on.
+
+    .PARAMETER ResourceName
+        That resource's name.
+
+    .PARAMETER AdapterKind
+        Its adapter kind; Container for a custom group.
+
+    .PARAMETER ResourceKind
+        Its resource kind; for a custom group, the group type, such as Environment.
+
+    .PARAMETER Timestamp
+        Creation and update time, in epoch milliseconds.
+    #>
+    [CmdletBinding()]
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Definition,
+        [Parameter(Mandatory)][string]$OwnerId,
+        [Parameter(Mandatory)][string]$ResourceId,
+        [Parameter(Mandatory)][string]$ResourceName,
+        [string]$AdapterKind = 'Container',
+        [string]$ResourceKind = 'Environment',
+        [long]$Timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    )
+
+    $id = Get-SynthContentId -Kind 'dashboard' -Name $Definition.Name
+    $resource = [ordered]@{
+        resourceId      = "resource:id:${ResourceId}_::_"
+        id              = $ResourceId
+        resourceName    = $ResourceName
+        resourceKindKey = $ResourceKind
+        adapterKindId   = $AdapterKind
+        resourceKindId  = ConvertTo-SynthResourceKindId -AdapterKind $AdapterKind -ResourceKind $ResourceKind
+        traversalSpecId = ''
+    }
+    $widgets = foreach ($w in $Definition.Widgets) {
+        [ordered]@{
+            tabId          = $id
+            collapsed      = $false
+            id             = Get-SynthContentId -Kind 'widget' -Name "$($Definition.Name)/$($w.View)"
+            gridsterCoords = [ordered]@{ w = $w.W; x = $w.X; h = $w.H; y = $w.Y }
+            state          = ''
+            type           = 'View'
+            title          = $w.View
+            config         = [ordered]@{
+                refreshInterval  = 300
+                resource         = $resource
+                traversalSpecId  = ''
+                refreshContent   = @{ refreshContent = $false }
+                isUpdatedView    = $true
+                chartViewItems   = @()
+                selectFirstRow   = @{ selectFirstRow = $false }
+                selfProvider     = @{ selfProvider = $true }
+                title            = $w.View
+                viewDefinitionId = Get-SynthContentId -Kind 'view' -Name $w.View
+            }
+            height         = 0
+            states         = @()
+        }
+    }
+
+    [ordered]@{
+        shared               = $true
+        hidden               = $false
+        creationTime         = $Timestamp
+        autoswitchEnabled    = $false
+        importAttempts       = 0
+        columnProportion     = '1'
+        importComplete       = $true
+        description          = $Definition.Description
+        widgets              = @($widgets)
+        states               = @()
+        editAllowed          = $true
+        homeTab              = $false
+        rank                 = 0
+        disabled             = $false
+        id                   = $id
+        locked               = $false
+        dashboardNavigations = @{}
+        widgetInteractions   = @()
+        namePath             = 'vcfops-synth'
+        lastUpdateUserId     = $OwnerId
+        columnCount          = 1
+        userId               = $OwnerId
+        name                 = $Definition.Name
+        gridsterMaxColumns   = 12
+        lastUpdateTime       = $Timestamp
+    }
+}
+
 function New-SynthContentBundle {
     <#
     .SYNOPSIS
