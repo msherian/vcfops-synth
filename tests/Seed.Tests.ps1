@@ -363,6 +363,23 @@ Describe 'New-SynthSeedPlan' {
         Get-Entry $ds.stats 'capacity|used_space' | Should -Be 1
     }
 
+    It 'gives a datastore the latency keys its rubric lacks, from the VMs on it' {
+        $ds = Get-PlanObject $script:plan 'ds-eeee000001'
+        # One powered-on VM with a read latency figure and none for writes.
+        Get-Entry $ds.stats 'datastore|totalReadLatency_average' | Should -Be 1.5
+        Get-Entry $ds.stats 'datastore|totalWriteLatency_average' | Should -Be 0
+        @($script:plan.objects | Where-Object { $_.kind -ne 'Datastore' } | ForEach-Object { $_.stats } | Where-Object { $_.key -like 'datastore|total*Latency_average' }) | Should -BeNullOrEmpty
+    }
+
+    It 'adds a datastore latency key only once when the rubric already has it' {
+        $rubric = New-TestRubricSet
+        $rubric.Datastore = New-TestRubric 'Datastore' @{ 'capacity|used_space' = 100; 'datastore|totalReadLatency_average' = 3 } @{ 'summary|type' = 'nfs' }
+        $ds = Get-PlanObject (New-SynthSeedPlan -Inventory (New-TestInventory) -Rubric $rubric -VcId 'vc-uuid-0001') 'ds-eeee000001'
+        @($ds.stats | Where-Object { $_.key -eq 'datastore|totalReadLatency_average' }).Count | Should -Be 1
+        Get-Entry $ds.stats 'datastore|totalReadLatency_average' | Should -Be 1.5
+        @($ds.stats | Where-Object { $_.key -eq 'datastore|totalWriteLatency_average' }).Count | Should -Be 1
+    }
+
     It 'maps RVTools configuration onto Operations properties' {
         $cluster = Get-PlanObject $script:plan 'cluster-bbbb000001'
         Get-Entry $cluster.properties 'configuration|dasConfig|admissionControlEnabled' | Should -Be 'true'

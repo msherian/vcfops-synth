@@ -461,4 +461,40 @@ Describe 'Get-SynthCalibration keys' {
         $keys | Should -Contain 'virtualDisk|read_average'
         $keys | Should -Contain 'storage|totalReadLatency_average'
     }
+
+    It 'calibrates a datastore''s latency from its powered-on VMs, weighted by their IOPS' {
+        $vms = @(
+            @{ id = 'vm-1'; powerState = 'poweredOn'; baseline = @{ perf = @{ readLatencyAvgMs = 2; readLatencyPeakMs = 10; readIopsAvg = 300; readIopsPeak = 1000; writeLatencyAvgMs = 4; writeIopsAvg = 100 } } }
+            @{ id = 'vm-2'; powerState = 'poweredOn'; baseline = @{ perf = @{ readLatencyAvgMs = 8; readLatencyPeakMs = 40; readIopsAvg = 100; readIopsPeak = 1000 } } }
+            @{ id = 'vm-3'; powerState = 'poweredOff'; baseline = @{ perf = @{ readLatencyAvgMs = 500; readLatencyPeakMs = 900 } } }
+            @{ id = 'vm-4'; powerState = 'poweredOn' }
+        )
+        $result = InModuleScope VcfOpsSynth -Parameters @{ Vms = $vms } {
+            param($Vms)
+            @{
+                Full  = Get-SynthCalibration -Kind 'Datastore' -Item @{ id = 'ds-1' } -Vms $Vms
+                Empty = Get-SynthCalibration -Kind 'Datastore' -Item @{ id = 'ds-2' } -Vms @()
+            }
+        }
+        # Read: (2 x 300 + 8 x 100) / 400 on average, (10 x 1000 + 40 x 1000) / 2000 at peak; the powered-off VM is left out.
+        "$($result.Full['datastore|totalReadLatency_average'][0]) $($result.Full['datastore|totalReadLatency_average'][1])" | Should -Be '3.5 25'
+        # Write: one VM with no peak figure keeps its average as the peak.
+        "$($result.Full['datastore|totalWriteLatency_average'][0]) $($result.Full['datastore|totalWriteLatency_average'][1])" | Should -Be '4 4'
+        $result.Empty.Count | Should -Be 0
+    }
+
+    It 'gives a datastore''s latency series the calibrated curve in the backfill spec' {
+        InModuleScope VcfOpsSynth {
+            $plan = @{ objects = @(@{ key = 'ds-1'; kind = 'Datastore'; stats = @(@{ key = 'datastore|totalReadLatency_average'; value = 1.5 }, @{ key = 'datastore|totalWriteLatency_average'; value = 0 }) }) }
+            $inventory = @{ datacenters = @(); clusters = @(); hosts = @(); datastores = @(@{ id = 'ds-1' }); switches = @(); networks = @(); folders = @()
+                vms = @(@{ id = 'vm-1'; powerState = 'poweredOn'; profile = 'steady'; host = $null; cluster = $null; datacenter = $null; folderId = $null; datastores = @('ds-1'); nics = @(); cpu = @{ capacityMhz = 2000; usageMhz = 100 }; memory = @{ sizeMiB = 1024 }
+                        baseline = @{ perf = @{ readLatencyAvgMs = 1.5; readLatencyPeakMs = 30; readIopsAvg = 10; readIopsPeak = 100 } } }) }
+            $series = (New-SynthBackfillSpec -Plan $plan -Inventory $inventory -Ids @{ 'ds-1' = 'r1' }).Series
+            $read = @($series | Where-Object Key -eq 'datastore|totalReadLatency_average')[0]
+            "$($read.Mode) $($read.A) $($read.B)" | Should -Be 'Calibrated 1.5 30'
+            # No write figures on any VM: the key stays at its seeded value.
+            $write = @($series | Where-Object Key -eq 'datastore|totalWriteLatency_average')[0]
+            "$($write.Mode) $($write.A)" | Should -Be 'Constant 0'
+        }
+    }
 }

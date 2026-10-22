@@ -237,6 +237,8 @@ Capture, per kind: `GET /api/resources?adapterKind=VMWARE&resourceKind={kind}` t
 | DistributedVirtualPortgroup | vsan-vds02-mgmt-01a | 20 | 26 |
 | VmwareDistributedVirtualSwitch | vds02-mgmt-01a | 45 | 9 |
 
+The Datastore rubric is a vSAN datastore, which has no `datastore|totalReadLatency_average` or `datastore|totalWriteLatency_average`. VMFS and NFS datastores have both and the Datastore latency alert reads them, so the seed adds them to every synthetic datastore, valued from the LiveOptics latency of the VMs on it (weighted by their IOPS).
+
 About 300 of the VM's stat keys and most of its properties are per instance (`virtualDisk:scsi0:N|...`, NICs, guest file systems). So a synthetic VM's rubric has to be expanded from its own disk and NIC counts (from RVTools), not copied blindly from one reference VM.
 
 Test: created `Synth-spike05-vm01` as `VMWARE/VirtualMachine` under the vc-mgmt-a adapter instance (`POST /api/resources/adapters/{id}`, all six VM identifiers, the real vCenter's `VMEntityVCID`). Then pushed all 657 stat keys (`POST /api/resources/{id}/stats`, `stat-content`) and all 399 properties (`POST /api/resources/{id}/properties`, `property-content`, numbers as `data` and strings as `values`, with the reference VM's name and id replaced). After one collection cycle:
