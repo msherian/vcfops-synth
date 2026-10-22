@@ -153,12 +153,27 @@ namespace VcfOpsSynth
             return curve;
         }
 
-        // An object's shape: its components' curves summed by weight; a flat curve when it has none.
+        // True when an object has no workload to follow: no VMs, or only powered-off ones. A powered-off VM's
+        // own curve (its one component, with its own seed) is not counted, so the VM itself stays flat.
+        public static bool HasNoActiveComponent(ObjectSpec o)
+        {
+            if (o.Components == null || o.Components.Length == 0) return true;
+            bool others = false;
+            foreach (var c in o.Components)
+            {
+                if (!string.Equals(c.Profile, "off", StringComparison.OrdinalIgnoreCase)) return false;
+                if (c.Seed != o.Seed) others = true;
+            }
+            return others;
+        }
+
+        // An object's shape: its components' curves summed by weight; a gently noisy flat curve when it has
+        // none, or only powered-off ones, so a host whose VMs are all off can still meet its LiveOptics peak.
         public static double[] Shape(ObjectSpec o, double[] how, int stepMs)
         {
             int n = how.Length;
             var shape = new double[n];
-            if (o.Components == null || o.Components.Length == 0)
+            if (HasNoActiveComponent(o))
             {
                 var rng = new Rng("flat|" + o.Seed);
                 for (int i = 0; i < n; i++) shape[i] = Math.Exp(0.05 * rng.Gauss());
