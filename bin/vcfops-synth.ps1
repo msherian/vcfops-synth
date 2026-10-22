@@ -94,8 +94,9 @@
                           SLA matrix in content.sla). Last the list views and reports (VM tier list, oversized and
                           undersized VMs, configuration hygiene, cluster tier pressure; weekly tier compliance and
                           rightsizing reports), written to <paths.data>/content-bundle.zip and imported with force,
-                          so a re-run overwrites them by name. Exit code 1 when any item is rejected; the rest are
-                          still published. Dashboards later in Phase 7.
+                          so a re-run overwrites them by name. The same bundle carries two dashboards (service tiers;
+                          rightsizing and hygiene) that show those views on the estate group. Exit code 1 when any
+                          item is rejected; the rest are still published.
                           -DryRun        list what would be created or updated, and write the bundle without
                                          importing it (VCFOPS_SYNTH_DRY_RUN)
                           -ImportField   multipart field the bundle is sent in (VCFOPS_SYNTH_IMPORT_FIELD;
@@ -644,10 +645,22 @@ try {
                 # The signed-in user owns the content; a directory user's @domain is not part of the Operations user name.
                 $ownerName = ([string]$config.operations.username) -replace '@.*$'
                 $ownerId = Get-SynthOpsUserId -UserName $ownerName
-                $bundle = New-SynthContentBundle -Path (Join-Path $config.paths.data 'content-bundle.zip') -OwnerId $ownerId -UserName $ownerName -View $views -Report $reports
-                foreach ($v in $viewContent.Views) { Write-Host ('  {0,-14} {1,-14} {2}' -f $(if ($options.DryRun) { 'would import' } else { 'import' }), 'view', $v.Name) }
-                foreach ($r in $viewContent.Reports) { Write-Host ('  {0,-14} {1,-14} {2}' -f $(if ($options.DryRun) { 'would import' } else { 'import' }), 'report', $r.Name) }
-                Write-Host "  Bundle: $($bundle.Path) ($($bundle.Views) views, $($bundle.Reports) reports)"
+                # Dashboards show the views on the estate group, so they need its id; a dry run that would create the group has none yet.
+                $estate = @($groups | Where-Object { $_.Policy -eq 'Base' })[0]
+                $estateId = if ($estate) { @($results | Where-Object Name -eq $estate.Name)[0].Id }
+                $dashboards = @()
+                if ($estateId) {
+                    $dashboards = @(Get-SynthDashboardContent -Prefix $config.prefix | ForEach-Object {
+                            ConvertTo-SynthDashboard -Definition $_ -OwnerId $ownerId -ResourceId $estateId -ResourceName $estate.Name -ResourceKind $estate.Type
+                        })
+                }
+                $bundle = New-SynthContentBundle -Path (Join-Path $config.paths.data 'content-bundle.zip') -OwnerId $ownerId -UserName $ownerName -View $views -Report $reports -Dashboard $dashboards
+                $verb = if ($options.DryRun) { 'would import' } else { 'import' }
+                foreach ($v in $viewContent.Views) { Write-Host ('  {0,-14} {1,-14} {2}' -f $verb, 'view', $v.Name) }
+                foreach ($r in $viewContent.Reports) { Write-Host ('  {0,-14} {1,-14} {2}' -f $verb, 'report', $r.Name) }
+                foreach ($d in $dashboards) { Write-Host ('  {0,-14} {1,-14} {2}' -f $verb, 'dashboard', $d.name) }
+                if (-not $estateId) { Write-Host "  Dashboards left out: the $($estate.Name) group does not exist yet, and they show their views on it." }
+                Write-Host "  Bundle: $($bundle.Path) ($($bundle.Views) views, $($bundle.Reports) reports, $($bundle.Dashboards) dashboards)"
                 if (-not $options.DryRun) {
                     $field = if ($options.ImportField) { $options.ImportField } else { 'contentFile' }
                     $import = Import-SynthContentBundle -Path $bundle.Path -Force -FieldName $field
