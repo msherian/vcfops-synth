@@ -226,12 +226,12 @@ Describe 'Scenarios' {
         @($e.Overlays['cl-1'] | Where-Object { $_.Op -eq 'Multiply' })[0].Value | Should -BeLessThan 0.67
     }
 
-    It 'S4 fills each guest file system to 95 % of its own capacity' {
+    It 'S4 fills each guest file system to 97 % of its own capacity' {
         $e = Get-SynthScenarioEffect -Scenario @{ id = 'S4'; target = 'vm-g1'; startedMs = 0; rampMinutes = 0 } -Inventory $script:inventory -Plan $script:plan
         $usage = @($e.Overlays['vm-g1'] | Where-Object { 'guestfilesystem:C:\|usage' -match $_.Pattern })
         $usage.Count | Should -Be 1
-        $usage[0].Value | Should -Be 95
-        @($e.Overlays['vm-g1'] | Where-Object { 'guestfilesystem|usage_total' -match $_.Pattern })[0].Value | Should -Be 95
+        $usage[0].Value | Should -Be 97
+        @($e.Overlays['vm-g1'] | Where-Object { 'guestfilesystem|usage_total' -match $_.Pattern })[0].Value | Should -Be 97
     }
 
     It 'records a started scenario, restarts it in place, and stops one or all' {
