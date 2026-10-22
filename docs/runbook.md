@@ -58,7 +58,7 @@ Read these before pointing the image at a VCF Operations instance:
 - **The holder adapter instance.** Seed creates a VMWARE adapter instance called `vcfops-synth holder - do not start` (`seed.adapterInstance`) and puts the whole synthetic estate under it. It has a vCenter address that cannot resolve and a placeholder credential. **Never start it.** Starting it makes it look for its vCenter, and every object under it is marked not existing. It may show as not collecting; that is expected.
 - **Not existing means deleted after 7 days.** Operations deletes objects that stay not existing once the Deleted Objects window in Global Settings passes (168 hours by default). Do not seed under a real vCenter adapter instance: when it restarts it marks every object its vCenter does not have as not existing, groups empty out, and a week later the objects are gone. Seed warns if the instance you name collects.
 - **Expect retries on a small Operations.** Backfill keeps each post under `-MaxSamples` and halves it when Operations refuses it, retrying with growing waits. The summary lists objects that were refused, or answered but not stored; run backfill again to fill them in.
-- **Clean up with reset.** `reset` reports only; `reset -Force` deletes the seeded objects (found by tag and identifier, never by name), and `-IncludeContent` also deletes the Synth- groups, policies, alerts, symptoms and super metrics. With `-ApplianceSsh root@<ops appliance>` and an SSH key the appliance trusts, it also deletes the Synth- views, reports and dashboards with ops-cli; without it, it lists them to delete in the UI and writes `content-delete.json` to the data folder, for `bin/ops-content-delete.py` to delete them on the appliance (see the README's reset section). The holder instance stays.
+- **Clean up with reset.** `reset` reports only; `reset -Force` deletes the seeded objects (found by tag and identifier, never by name), and `-IncludeContent` also deletes the Synth- groups, policies, alerts, symptoms and super metrics. With `-ApplianceSsh root@<ops appliance>` (an SSH key the appliance trusts, or else the password, which ssh asks for once), it also deletes the Synth- views, reports and dashboards with ops-cli; without it, it lists them to delete in the UI and writes `content-delete.json` to the data folder, for `bin/ops-content-delete.py` to delete them on the appliance (see the README's reset section). The holder instance stays.
 - **Report problems** with the command, the summary lines and the Operations version. Leave out host names, object names and credentials.
 
 ### Seed and backfill
@@ -104,6 +104,8 @@ docker run "${opts[@]}" "$img" reset                          # report only
 docker run "${opts[@]}" "$img" reset -Force -IncludeContent
 # Views, reports and dashboards too: mount a key the appliance trusts (readable by uid 999).
 docker run "${opts[@]}" -v "$HOME/.ssh/id_ed25519:/keys/id:ro" "$img" reset -Force -IncludeContent -ApplianceSsh root@<ops appliance> -SshKey /keys/id
+# Without a trusted key, run with -it so ssh can ask for the password on the terminal.
+docker run -it "${opts[@]}" "$img" reset -Force -IncludeContent -ApplianceSsh root@<ops appliance>
 docker rm -f synth-feed
 ```
 

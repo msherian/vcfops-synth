@@ -146,30 +146,60 @@ Describe 'Save-SynthContentDeletePayload' {
 Describe 'Remove-SynthApplianceContent' {
     BeforeEach {
         $script:ssh = [System.Collections.Generic.List[object]]::new()
+        $script:refuseKey = $false
+        # Stands in for ssh and bin/ops-content-delete.py on the appliance: reads the payload from the command, answers per name.
         Mock -ModuleName VcfOpsSynth Invoke-SynthSsh {
-            $script:ssh.Add([pscustomobject]@{ Target = $Target; Command = $Command; IdentityFile = $IdentityFile })
-            if ($Command -like "*report delete 'Synth-Rightsizing'") { return [pscustomobject]@{ ExitCode = 1; Output = 'Report Synth-Rightsizing not found' } }
-            if ($Command -like "*dashboard delete all 'Synth-Service tiers'") { return [pscustomobject]@{ ExitCode = 0; Output = 'Error: permission denied' } }
-            [pscustomobject]@{ ExitCode = 0; Output = 'Deleted' }
+            $script:ssh.Add([pscustomobject]@{ Target = $Target; Command = $Command; IdentityFile = $IdentityFile; Interactive = [bool]$Interactive })
+            if ($script:refuseKey -and -not $Interactive) { return [pscustomobject]@{ ExitCode = 255; Output = 'root@ops.example.invalid: Permission denied (publickey,password).' } }
+            $b64 = [regex]::Matches($Command, 'echo (\S+) \| base64 -d')[1].Groups[1].Value
+            $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64)) | ConvertFrom-Json
+            $out = foreach ($kind in 'view', 'report', 'dashboard') {
+                foreach ($name in @($payload.$kind)) {
+                    $action = switch ($name) { 'Synth-Rightsizing' { 'not there' } 'Synth-Service tiers' { 'failed' } default { 'deleted' } }
+                    @{ action = $action; kind = $kind; name = $name; error = $(if ($action -eq 'failed') { 'exit 1: permission denied' }) } | ConvertTo-Json -Compress
+                }
+            }
+            [pscustomobject]@{ ExitCode = 1; Output = ($out -join "`n") }
         }
     }
 
-    It 'deletes each named item with ops-cli: views, then reports, then dashboards for all users' {
+    It 'deletes every named item in one SSH session, dashboards for all users, with the key first' {
         $out = @(Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -IdentityFile '/keys/id' -Confirm:$false)
-        $script:ssh.Count | Should -Be 9
-        @($script:ssh | Where-Object Target -ne 'root@ops.example.invalid').Count | Should -Be 0
+        $script:ssh.Count | Should -Be 1
+        $script:ssh[0].Target | Should -Be 'root@ops.example.invalid'
         $script:ssh[0].IdentityFile | Should -Be '/keys/id'
-        $script:ssh[0].Command | Should -BeLike "*ops-cli.py view delete 'Synth-*'"
-        @($script:ssh | Where-Object Command -like '*dashboard delete all *').Count | Should -Be 2
-        @($script:ssh | Where-Object Command -match '-all').Count | Should -Be 0
+        $script:ssh[0].Interactive | Should -BeFalse
+        $script:ssh[0].Command | Should -BeLike '*--apply --jsonl*'
+        $script:ssh[0].Command | Should -Not -Match ' -all'
+        $out.Count | Should -Be 9
         @($out | Where-Object Action -eq 'deleted').Count | Should -Be 7
         ($out | Where-Object Name -eq 'Synth-Rightsizing').Action | Should -Be 'not there'
         ($out | Where-Object Name -eq 'Synth-Service tiers').Action | Should -Be 'failed'
+        ($out | Where-Object Name -eq 'Synth-Service tiers').Kind | Should -Be 'dashboard'
     }
 
-    It 'quotes a name with a single quote for the remote shell' {
-        $null = Remove-SynthApplianceContent -Prefix "Lab's " -SshTarget 'root@ops.example.invalid' -Confirm:$false
-        $script:ssh[0].Command | Should -BeLike "*view delete 'Lab'\''s *'"
+    It 'sends the appliance script itself, with Unix line endings' {
+        $null = Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -Confirm:$false
+        $b64 = [regex]::Matches($script:ssh[0].Command, 'echo (\S+) \| base64 -d')[0].Groups[1].Value
+        $code = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
+        $code | Should -BeLike '*def refusal(prefix, name)*'
+        $code | Should -Not -Match "`r"
+    }
+
+    It 'falls back to a password prompt from ssh when the key is refused' {
+        $script:refuseKey = $true
+        $out = @(Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -Confirm:$false)
+        $script:ssh.Count | Should -Be 2
+        $script:ssh[0].Interactive | Should -BeFalse
+        $script:ssh[1].Interactive | Should -BeTrue
+        @($out | Where-Object Action -eq 'deleted').Count | Should -Be 7
+    }
+
+    It 'marks every item failed when the appliance gives no result' {
+        Mock -ModuleName VcfOpsSynth Invoke-SynthSsh { [pscustomobject]@{ ExitCode = 255; Output = 'ssh: connect to host ops.example.invalid port 22: Connection timed out' } }
+        $out = @(Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -Confirm:$false)
+        @($out | Where-Object Action -eq 'failed').Count | Should -Be 9
+        $out[0].Error | Should -BeLike 'exit 255: *timed out'
     }
 
     It 'refuses a prefix that would make a name with a comma or a leading dash' {

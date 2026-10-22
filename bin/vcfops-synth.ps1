@@ -129,7 +129,7 @@
                                           -ApplianceSsh also the views, reports and dashboards, by exact name with
                                           ops-cli on the appliance; without it, lists them to delete in the UI
                                           and writes <data>/content-delete.json for bin/ops-content-delete.py
-                          -ApplianceSsh   user@host of the Operations appliance, key sign-in only
+                          -ApplianceSsh   user@host of the Operations appliance; key first, else ssh asks for the password
                                           (VCFOPS_SYNTH_APPLIANCE_SSH)
                           -SshKey         private key for -ApplianceSsh (VCFOPS_SYNTH_SSH_KEY; default ssh's own)
                           -DryRun         report only, even with -Force (VCFOPS_SYNTH_DRY_RUN)
@@ -177,7 +177,7 @@
 
 .PARAMETER ApplianceSsh
     reset -IncludeContent: user@host of the VCF Operations appliance; reset signs in with a key and deletes the
-    views, reports and dashboards with ops-cli. VCFOPS_SYNTH_APPLIANCE_SSH.
+    views, reports and dashboards with ops-cli, in one SSH session; if the key is refused, ssh asks for the password on the terminal. VCFOPS_SYNTH_APPLIANCE_SSH.
 
 .PARAMETER SshKey
     reset: the private key for -ApplianceSsh. VCFOPS_SYNTH_SSH_KEY.

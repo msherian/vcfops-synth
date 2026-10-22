@@ -50,6 +50,7 @@ def main():
     parser = argparse.ArgumentParser(description='Delete the vcfops-synth views, reports and dashboards with ops-cli.')
     parser.add_argument('payload', help='content-delete.json written by reset -IncludeContent')
     parser.add_argument('--apply', action='store_true', help='delete for real; without it, report only')
+    parser.add_argument('--jsonl', action='store_true', help='one JSON object per item, for reset -ApplianceSsh')
     parser.add_argument('--opscli-dir', default=OPSCLI_DIR, help='folder holding ops-cli.py (default %(default)s)')
     args = parser.parse_args()
 
@@ -63,15 +64,23 @@ def main():
         print('ops-cli.py not found in %s' % args.opscli_dir, file=sys.stderr)
         return 2
 
+    def emit(action, kind, name, error=None):
+        if args.jsonl:
+            print(json.dumps({'action': action, 'kind': kind, 'name': name, 'error': error}))
+        else:
+            print('  %-14s %-10s %s' % (action, kind, name) + (' (%s)' % error if action == 'refused' else ''))
+            if action == 'failed':
+                print('    %s' % error)
+
     failed = 0
     for kind, name in items:
         reason = refusal(prefix, name)
         if reason:
             failed += 1
-            print('  %-14s %-10s %s (%s)' % ('refused', kind, name, reason))
+            emit('refused', kind, name, reason)
             continue
         if not args.apply:
-            print('  %-14s %-10s %s' % ('would delete', kind, name))
+            emit('would delete', kind, name)
             continue
         cmd = [sys.executable, opscli, kind, 'delete'] + (['all'] if kind == 'dashboard' else []) + [name]
         run = subprocess.run(cmd, cwd=args.opscli_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
@@ -83,11 +92,9 @@ def main():
         else:
             action = 'failed'
             failed += 1
-        print('  %-14s %-10s %s' % (action, kind, name))
-        if action == 'failed':
-            print('    exit %d: %s' % (run.returncode, output))
+        emit(action, kind, name, 'exit %d: %s' % (run.returncode, output) if action == 'failed' else None)
 
-    if not args.apply:
+    if not args.apply and not args.jsonl:
         print('Report only: nothing was deleted. Add --apply to delete.')
     return 1 if failed else 0
 
