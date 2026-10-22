@@ -1,0 +1,19 @@
+{
+  "tiers": {
+    "Gold": {
+      "timeRemainingDays": { "warning": 120, "critical": 40 },
+      "capacityBufferPercent": 20,
+      "disableAlerts": []
+    },
+    "Silver": {
+      "timeRemainingDays": { "warning": 90, "critical": 30 },
+      "capacityBufferPercent": 10,
+      "disableAlerts": []
+    },
+    "Bronze": {
+      "timeRemainingDays": { "warning": 30, "critical": 10 },
+      "capacityBufferPercent": 0,
+      "disableAlerts": ["VM memory pressure"]
+    }
+  }
+}
