@@ -23,6 +23,8 @@ import sys
 OPSCLI_DIR = '/usr/lib/vmware-vcops/tools/opscli'
 NOT_THERE = re.compile(r'not (found|exist)|does ?n.t exist|no such', re.IGNORECASE)
 FAILED = re.compile(r'\b(error|fail(ed|ure)?|exception)\b', re.IGNORECASE)
+# ops-cli's Java start-up chatter, left out of a failure's message.
+NOISE = re.compile(r'^(INFO:|WARNING:|[A-Z][a-z]{2} \d+, \d{4} .*(PM|AM) org\.|VMware Cloud|Starting VMware|\s*$)')
 
 
 def load_items(path):
@@ -92,7 +94,8 @@ def main():
         else:
             action = 'failed'
             failed += 1
-        emit(action, kind, name, 'exit %d: %s' % (run.returncode, output) if action == 'failed' else None)
+        detail = [line for line in output.splitlines() if not NOISE.match(line)][-3:]
+        emit(action, kind, name, 'exit %d: %s' % (run.returncode, ' | '.join(detail)) if action == 'failed' else None)
 
     if not args.apply and not args.jsonl:
         print('Report only: nothing was deleted. Add --apply to delete.')
