@@ -538,6 +538,8 @@ try {
 
         'version' {
             Write-Host "vcfops-synth $toolVersion (PowerShell $($PSVersionTable.PSVersion))"
+            # Set in the image from its build: the release (or branch) and the commit it was built from.
+            if ($env:VCFOPS_IMAGE_VERSION -or $env:VCFOPS_IMAGE_REVISION) { Write-Host "Image: $($env:VCFOPS_IMAGE_VERSION), revision $($env:VCFOPS_IMAGE_REVISION)" }
             exit 0
         }
 

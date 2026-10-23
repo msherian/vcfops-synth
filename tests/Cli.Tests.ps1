@@ -28,6 +28,12 @@ Describe 'vcfops-synth CLI' {
         $result.Output | Should -Match '^vcfops-synth \d+\.\d+\.\d+'
     }
 
+    It 'prints the image version and revision when the image sets them' {
+        $result = Invoke-Cli @('version') -Environment @{ VCFOPS_IMAGE_VERSION = '9.8.7'; VCFOPS_IMAGE_REVISION = 'abc1234' }
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Image: 9\.8\.7, revision abc1234'
+    }
+
     It 'validates the example configuration' {
         $result = Invoke-Cli @('config', '-ConfigPath', $script:example)
         $result.ExitCode | Should -Be 0
@@ -122,6 +128,12 @@ Describe 'vcfops-synth CLI' {
         $result = Invoke-Cli @() -Environment @{ VCFOPS_SYNTH_COMMAND = 'version' }
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match '^vcfops-synth \d+\.\d+\.\d+'
+    }
+
+    It 'prints the image version and revision when the image sets them' {
+        $result = Invoke-Cli @('version') -Environment @{ VCFOPS_IMAGE_VERSION = '9.8.7'; VCFOPS_IMAGE_REVISION = 'abc1234' }
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Image: 9\.8\.7, revision abc1234'
     }
 
     It 'takes the host and account from -CredentialFile, with single values winning in the same tier' {

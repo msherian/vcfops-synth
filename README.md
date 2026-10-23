@@ -280,7 +280,7 @@ Invoke-Pester -Path ./tests
 pwsh ./bin/vcfops-synth.ps1 plan -ConfigPath ./config/lab.example.json
 ```
 
-CI lints, tests and builds the image on every pull request. Pushes to `main` publish `latest` and a short-SHA tag to GHCR; `v*` tags publish versioned images. Docker Hub publishing is wired but off until the repository variable `PUBLISH_DOCKERHUB` is set to `true` with `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets.
+CI lints, tests and builds the image on every pull request. Pushes to `main` publish `latest` and a short-SHA tag to GHCR; a `v*` tag publishes versioned images without the `v`: tagging `v0.1.1` publishes `0.1.1` and `0.1`. `vcfops-synth version` in the image prints the module version and the image's version and revision. Docker Hub publishing is wired but off until the repository variable `PUBLISH_DOCKERHUB` is set to `true` with `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets.
 
 ## Handling customer data
 

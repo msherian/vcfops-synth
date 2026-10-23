@@ -37,7 +37,10 @@ COPY src ./src
 COPY bin ./bin
 COPY config/lab.example.json config/tiering.example.json config/sla.example.json ./config/
 
+# The image's version and revision, for the version command.
 ENV VCFOPS_SYNTH_CONFIG=/config/lab.json \
+    VCFOPS_IMAGE_VERSION="${VERSION}" \
+    VCFOPS_IMAGE_REVISION="${REVISION}" \
     POWERSHELL_TELEMETRY_OPTOUT=1 \
     POWERSHELL_UPDATECHECK=Off
 
