@@ -707,15 +707,16 @@ try {
 
             $null = Connect-Cli -Config $config
             try {
-                $seedTarget = Resolve-SynthSeedTarget -Name $adapterName -Create:(-not $options.DryRun)
+                $seedTarget = Resolve-SynthSeedTarget -Name $adapterName -Create:(-not $options.DryRun) -Preview:$options.DryRun
                 if ($seedTarget.Created) { Write-Host "Created holder adapter instance '$adapterName'. Do not start it." }
+                if ($seedTarget.WouldCreate) { Write-Host "Would create holder adapter instance '$adapterName' (never to be started)." }
                 if ($seedTarget.Collecting) { Write-Host "Warning: '$adapterName' collects from a vCenter. When it restarts it marks every seeded object its vCenter lacks as not existing, and groups and policies leave them out. Seed under a holder instance instead (seed.adapterInstance)." }
                 $built = New-CliSeedPlan -Config $config -Inventory $inventory -Rubrics $rubrics -Target $seedTarget
                 $plan = $built.Plan
                 # The project tag is the customer's project folder name, so only its presence is shown.
                 Write-Host "Tags: $(($built.Tags | ForEach-Object { if ($_.Category -eq 'Project') { 'Project: (set, not shown)' } else { "$($_.Category): $($_.Name)" } }) -join '; ')"
                 $objects = @($plan.objects)
-                Write-Host "Seed plan for adapter instance $adapterName ($($seedTarget.AdapterInstanceId)), vCenter $($seedTarget.VcId):"
+                Write-Host $(if ($seedTarget.WouldCreate) { "Seed plan for adapter instance $adapterName (to be created):" } else { "Seed plan for adapter instance $adapterName ($($seedTarget.AdapterInstanceId)), vCenter $($seedTarget.VcId):" })
                 $objects | Group-Object { $_.kind } | ForEach-Object { Write-Host "  $($_.Name): $($_.Count)" }
                 $edges = ($plan.links | ForEach-Object { @($_.children).Count } | Measure-Object -Sum).Sum
                 Write-Host "  $($objects.Count) objects, $edges links"

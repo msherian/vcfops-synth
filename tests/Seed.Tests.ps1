@@ -711,6 +711,21 @@ Describe 'Resolve-SynthSeedTarget' {
         @($script:calls | Where-Object Method -ne 'Get').Count | Should -Be 0
     }
 
+    It 'with -Preview, says a missing holder would be created, and creates nothing' {
+        $target = Resolve-SynthSeedTarget -Name 'holder' -Preview
+        $target.WouldCreate | Should -BeTrue
+        $target.Created | Should -BeFalse
+        $target.AdapterInstanceId | Should -BeNullOrEmpty
+        $target.VcId | Should -Not -BeNullOrEmpty
+        @($script:calls | Where-Object Method -ne 'Get').Count | Should -Be 0
+    }
+
+    It 'with -Preview, still returns an existing instance as it is' {
+        $target = Resolve-SynthSeedTarget -Name 'vc-mgmt-a' -Preview
+        $target.WouldCreate | Should -BeFalse
+        $target.AdapterInstanceId | Should -Not -BeNullOrEmpty
+    }
+
     It 'creates a never-started holder with its own VCID and an unresolvable address' {
         $target = Resolve-SynthSeedTarget -Name 'holder' -Create
 
