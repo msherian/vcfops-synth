@@ -27,7 +27,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   ghcr.io/msherian/vcfops-synth plan
 ```
 
-Docker Desktop on Windows and macOS maps bind-mount ownership itself. There, `--user` should not be needed, though this hasn't been tested yet.
+Docker Desktop on Windows maps bind-mount ownership itself, so leave `--user` out there: tested on 23 October 2026 (Docker Desktop 29.9, Windows Server 2025), the image's uid 999 wrote to `data\` and read the mounted credentials file and SSH key. macOS should behave the same, though it hasn't been tested.
 
 ### Sign in with the VCF installer credentials file
 
@@ -48,7 +48,18 @@ docker run --rm --user "$(id -u):$(id -g)" \
   - a Docker secret (`-e VCFOPS_SECRET_NAME=ops-pass`);
   - `VCFOPS_PASSWORD` in the environment, which leaves the password visible in `docker inspect`.
 
-On PowerShell (Windows), replace `$PWD/...` with `${PWD}/...` and `$HOME` with `$env:USERPROFILE`. Write each `docker run` on one line, or end lines with a backtick instead of `\`.
+On PowerShell (Windows), replace `$PWD/...` with `${PWD}/...` and `$HOME` with `$env:USERPROFILE`. Write each `docker run` on one line, or end lines with a backtick instead of `\`. An array holds the common options:
+
+```powershell
+$opts = @('--rm', '-v', "${PWD}\config:/config", '-v', "${PWD}\data:/data",
+          '-v', "$env:USERPROFILE\Documents\vcf-installer-creds.json:/run/secrets/vcf-creds.json:ro",
+          '-e', 'VCFOPS_CREDENTIAL_FILE=/run/secrets/vcf-creds.json')
+docker run @opts ghcr.io/msherian/vcfops-synth connect-test
+```
+
+### Paths in lab.json
+
+Paths in `lab.json` are read inside the container, so they must be container paths (`/data/...`, `/config/...`), or left out to take the defaults under `/data`. A `lab.json` written for running the script on Windows, with `C:/...` paths, does not work in the container; keep a copy for the container with those paths rewritten, and mount its folder as `/config`.
 
 ### Before you start (testers)
 

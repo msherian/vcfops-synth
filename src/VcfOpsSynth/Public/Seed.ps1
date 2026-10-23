@@ -481,6 +481,10 @@ function Resolve-SynthSeedTarget {
     .PARAMETER Create
         Make the instance as a holder when there is none of that name.
 
+    .PARAMETER Preview
+        For a dry run: when there is no instance of that name, return a target that only says one would be
+        created (WouldCreate, no AdapterInstanceId, a placeholder VcId) instead of stopping.
+
     .EXAMPLE
         $target = Resolve-SynthSeedTarget -Name 'vcfops-synth holder - do not start' -Create
     #>
@@ -488,7 +492,8 @@ function Resolve-SynthSeedTarget {
     [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)][string]$Name,
-        [switch]$Create
+        [switch]$Create,
+        [switch]$Preview
     )
 
     $instances = @((Invoke-SynthOpsRequest -Method Get -Path 'adapters' -Query @{ adapterKindKey = 'VMWARE' }).adapterInstancesInfoDto)
@@ -497,6 +502,9 @@ function Resolve-SynthSeedTarget {
     if (-not $instance.Count -and $Create) {
         $instance = @(New-SynthHolderAdapter -Name $Name)
         $created = $true
+    }
+    if (-not $instance.Count -and $Preview) {
+        return @{ AdapterInstanceId = $null; VcId = [guid]::Empty.ToString(); Created = $false; WouldCreate = $true; Collecting = $false }
     }
     $others = ($instances | ForEach-Object { $_.resourceKey.name }) -join ', '
     if (-not $instance.Count) { throw "No VMWARE adapter instance named '$Name'; seed creates it as a holder. There are: $others." }
@@ -512,7 +520,7 @@ function Resolve-SynthSeedTarget {
         }
     }
     if (-not $vcId) { throw "Adapter instance '$Name' has no VMEntityVCID, on itself or on a datacenter under it." }
-    @{ AdapterInstanceId = $adapterId; VcId = $vcId; Created = $created; Collecting = [bool]$instance[0].PSObject.Properties['lastCollected'] }
+    @{ AdapterInstanceId = $adapterId; VcId = $vcId; Created = $created; WouldCreate = $false; Collecting = [bool]$instance[0].PSObject.Properties['lastCollected'] }
 }
 
 function Get-SynthSeedKind {
