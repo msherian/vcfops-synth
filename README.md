@@ -6,7 +6,7 @@ Everything ships as one Docker image, published to `ghcr.io/msherian/vcfops-synt
 
 ## Status
 
-Phases 0 to 4 are done: the image, CLI and Suite API sign-in, the RVTools and LiveOptics importer, seeding the estate into VCF Operations, and 30 days of backfilled history. Phase 5 (groups and tiered policies) is next. The commands below marked "to come" stop with exit code 3 and name the phase that builds them. Lab results and what they taught us are under [Results in the lab](#results-in-the-lab).
+The current release is **v0.1.1**, the first tester release (`ghcr.io/msherian/vcfops-synth:0.1.1`, or `:0.1` to follow patch releases; `latest` tracks `main`). Phases 0 to 8 are done: the image, CLI and Suite API sign-in, the RVTools and LiveOptics importer, seeding the estate into VCF Operations, 30 days of backfilled history, groups and tiered policies, the live feed and scenarios, symptoms, alerts, super metrics, views, reports and dashboards, and a reset that leaves nothing behind. Only Phase 9, the optional live-load mode, is still to come; its command stops with exit code 3 and names the phase. Lab results and what they taught us are under [Results in the lab](#results-in-the-lab), and what is still open under [Known gaps](#known-gaps).
 
 | Command | What it does | Phase |
 |---|---|---|
@@ -31,9 +31,9 @@ cp config/lab.example.json config/lab.json      # then set operations.fqdn for y
 export VCFOPS_PASSWORD='...'                     # never stored in lab.json
 
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
-  ghcr.io/msherian/vcfops-synth config
+  ghcr.io/msherian/vcfops-synth:0.1.1 config
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" -e VCFOPS_PASSWORD \
-  ghcr.io/msherian/vcfops-synth connect-test
+  ghcr.io/msherian/vcfops-synth:0.1.1 connect-test
 ```
 
 Then import an RVTools export (xlsx, or a folder of its CSV files) into the inventory model:
@@ -42,8 +42,8 @@ Then import an RVTools export (xlsx, or a folder of its CSV files) into the inve
 cp config/tiering.example.json config/tiering.json   # then edit the rules for this estate
 cp ~/Downloads/RVTools_export_all.xlsx data/rvtools.xlsx
 
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" ghcr.io/msherian/vcfops-synth import
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" ghcr.io/msherian/vcfops-synth plan
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" ghcr.io/msherian/vcfops-synth:0.1.1 import
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/config:/config" -v "$PWD/data:/data" ghcr.io/msherian/vcfops-synth:0.1.1 plan
 ```
 
 `--user` lets the container write to a `data/` folder you own on a Linux host. Signing in with the VCF installer credentials file, seeding and backfilling from the container, and resuming a stopped run are in [docs/runbook.md](docs/runbook.md#running-from-the-container).
@@ -151,7 +151,7 @@ Objects that already exist are found by their identifiers, not their names, and 
 
 Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. Operations 9.1.1 in the lab refused posts of about 250,000 samples or more with HTTP 500, so posts hold at most `-MaxSamples` samples and a refused one is halved, for the rest of the batch too. For a busy Operations, each post is retried up to 10 times with waits growing from 2 seconds to 60, and objects still refused get two more passes at the end of the run, one at a time; any left after that are reported and picked up by the next run. Five minutes after the last post, the last point of each pushed object's first and last metric is read back: in the lab, Operations sometimes answered posts it then never stored, so such objects are reported as not stored and left for the next run. The summary also counts the objects that had a post refused. In the lab, 30 days for the 1,644 objects with numeric metrics is 224,943 series and 1.94 billion samples, about 550,000 to 590,000 a second at concurrency 4 to 6 (about an hour), and about 6 bytes a sample in the Operations database. Each progress line shows the time, the batch duration and the time left.
 
-After a backfill, run `seed -Refresh`: history is posted with analytics off, and Operations only calculates capacity (time and capacity remaining) once points arrive with analytics on. Until the live feed exists (Phase 6), those figures stay at the last refreshed point.
+After a backfill, run `seed -Refresh`: history is posted with analytics off, and Operations only calculates capacity (time and capacity remaining) once points arrive with analytics on. The live feed (`feed`) then keeps them current.
 
 Calibration follows LiveOptics's average and peak exactly, with two edge cases. Where the peak is no higher than the average, the series is flat at the average. Where the average is 0 but the peak is not (LiveOptics rounds small figures down), the series is zero apart from one spike at the object's busiest point, so its mean still rounds to 0. A VM's disk throughput also goes on its first disk, because Operations calculates a VM's total write throughput from its per-disk values and overwrites a pushed total. The average is over the whole week, so a business-hours object runs at about twice its average on weekday working hours (09:00 to 18:00 in `timeZone`) and well under it at night and at weekends.
 
@@ -163,6 +163,10 @@ Calibration follows LiveOptics's average and peak exactly, with two edge cases. 
 | Backfilled | 30 days at 5 minutes: 1,644 objects, 224,943 series, 1.94 billion samples, no failures |
 | LiveOptics check | 1,918 of 1,935 calibrated series (99%) match the LiveOptics average and peak, over 40 random VMs and all 89 hosts; every series has all 8,640 points, and all 44 per-kind samples pass |
 | Capacity | after `seed -Refresh`, Operations calculates time and capacity remaining itself (for example 366 days and 35.8 % on a 16-core host) |
+| Content | 13 custom groups, 4 policies, 27 symptoms, 5 recommendations, 11 alerts, 4 super metrics, 5 views, 2 reports and 2 dashboards, all named `Synth-` |
+| Alerts | Scenarios S1 (noisy neighbour), S3 (storage latency, VMs and datastores) and S8 (host failure) raise their alerts and clear them when stopped |
+| Reset | `reset -Force -IncludeContent -ApplianceSsh` removes every seeded object and every piece of `Synth-` content, views, reports and dashboards included; only the `VcfOpsSynth` adapter kind stays, since Operations never deletes an adapter kind |
+| Docker validation (v0.1.0, 23 October 2026) | From a clean Operations 9.1.1, the image on Docker Desktop ran seed (2,220 objects), backfill (1,644 objects, 1.95 billion samples in 44 minutes, none refused), content and a full reset, with the live feed running as a detached container (`--restart unless-stopped`) |
 
 Findings that shaped the code:
 
@@ -170,6 +174,14 @@ Findings that shaped the code:
 - **Capacity keys are sizes, not activity.** `cpu|totalCapacity_average` ends in `_average` but is a capacity, so it stays flat through history.
 - **Seeded objects are found by tag and identifier, not prefix.** They keep their inventory names and carry the `vcfops-synth` and project tags; their managed object IDs contain `-synth-`.
 - **Memory:** a full plan and spec takes about 500 MB in one PowerShell process. On an 8 GB host the backfill and the verification were killed for low memory; 32 GB runs the whole sequence comfortably. On a small host, use `-Concurrency 2`.
+
+## Known gaps
+
+- **Rightsizing lists no VMs yet.** Operations builds its oversized and undersized recommendations from its own analytics history, which takes time to accumulate on live-fed data.
+- **The four `Synth-` super metrics are created but not enabled in `Synth-Base`**, so the report column that uses them is empty.
+- **Very high latency is real.** Datastore and VM latency follow LiveOptics as recorded, so an estate with very slow storage raises steady critical latency alerts on the objects concerned.
+- **ops-cli on 9.1.1** has the slf4j packaging fault described under [Reset](#reset); the toolset works around it without changing the appliance.
+- **Phase 9 live-load** (UPSA and Photon load VMs) is not built yet.
 
 ## Live feed and scenarios
 
