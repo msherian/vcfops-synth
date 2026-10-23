@@ -465,7 +465,19 @@ function New-SynthContentBundle {
     if ($Dashboard.Count) {
         $configuration.dashboards = $Dashboard.Count
         $configuration.dashboardsByOwner = @([ordered]@{ owner = $OwnerId; count = $Dashboard.Count })
-        $json = [ordered]@{ entries = @(); dashboards = @($Dashboard); uuid = (Get-SynthContentId -Kind 'dashboards' -Name $OwnerId) } | ConvertTo-Json -Depth 100
+        # entries must be an object (Operations 9.1.1 skips the dashboards when it is an array), listing each
+        # resource a widget shows so the import can map it, as a real export does.
+        $resources = [ordered]@{}
+        foreach ($d in $Dashboard) {
+            foreach ($w in @($d.widgets)) {
+                $r = $w.config.resource
+                if ($r -and -not $resources.Contains($r.resourceId)) {
+                    $resources[$r.resourceId] = [ordered]@{ resourceKindKey = $r.resourceKindKey; internalId = $r.resourceId; adapterKindKey = $r.adapterKindId; identifiers = @(); name = $r.resourceName }
+                }
+            }
+        }
+        $dashboardEntries = [ordered]@{ resourceKind = @(); adapterKind = @(); resource = @($resources.Values) }
+        $json = [ordered]@{ entries = $dashboardEntries; dashboards = @($Dashboard); uuid = (Get-SynthContentId -Kind 'dashboards' -Name $OwnerId) } | ConvertTo-Json -Depth 100
         $entries["dashboards/$OwnerId"] = & $zip ([ordered]@{ 'dashboard/dashboard.json' = $json; 'dashboard/resources/resources.properties' = "#Dashboard Localization`n" })
     }
     $root = [ordered]@{
