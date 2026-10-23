@@ -192,6 +192,11 @@ Describe 'New-SynthContentBundle' {
         $dj = (& $script:text $dashZip['dashboard/dashboard.json']) | ConvertFrom-Json
         $dj.dashboards[0].name | Should -Be 'Synth-Overview'
         $dj.PSObject.Properties.Name -join ',' | Should -Be 'entries,dashboards,uuid'
+        # An object, not an array: Operations skips the dashboards otherwise. It lists each resource a widget shows.
+        (& $script:text $dashZip['dashboard/dashboard.json']) | Should -Match '"entries":\s*\{'
+        $dj.entries.PSObject.Properties.Name -join ',' | Should -Be 'resourceKind,adapterKind,resource'
+        $shown = @($dj.dashboards.widgets | ForEach-Object { $_.config.resource.resourceId } | Where-Object { $_ } | Sort-Object -Unique)
+        @($dj.entries.resource.internalId | Sort-Object) | Should -Be $shown
     }
 
     It 'leaves out what it is not given, and writes nothing with -WhatIf' {
