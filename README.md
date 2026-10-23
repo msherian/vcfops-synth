@@ -6,7 +6,17 @@ Everything ships as one Docker image, published to `ghcr.io/msherian/vcfops-synt
 
 ## Status
 
-Phases 0 to 4 are done: the image, CLI and Suite API sign-in, the RVTools and LiveOptics importer, seeding the estate into VCF Operations, and 30 days of backfilled history. Phase 5 (groups and tiered policies) is next. The commands below marked "to come" stop with exit code 3 and name the phase that builds them. Lab results and what they taught us are under [Results in the lab](#results-in-the-lab).
+**Release 0.1.1** (23 October 2026), the first tester release: `ghcr.io/msherian/vcfops-synth:0.1.1`, or `:0.1` to follow patch releases. `latest` tracks `main`. `vcfops-synth version` in the image prints the release and the commit it was built from.
+
+Phases 0 to 8 are done and validated end to end from the published image against VCF Operations 9.1.1 in a Holodeck lab:
+- the importer (RVTools and LiveOptics);
+- seeding the estate under a holder adapter instance;
+- 30 days of backfilled history;
+- the live feed and scenarios;
+- custom groups, tier policies, symptoms, alerts, super metrics, views, reports and dashboards;
+- a reset that leaves nothing behind.
+
+Only the optional live-load mode (phase 9) is still to come. Its command stops with exit code 3. Lab results and what they taught us are under [Results in the lab](#results-in-the-lab).
 
 | Command | What it does | Phase |
 |---|---|---|
@@ -151,7 +161,7 @@ Objects that already exist are found by their identifiers, not their names, and 
 
 Progress is saved to `paths.state` after each batch, so a stopped run resumes over the same range; `-Restart` starts afresh. `-DryRun` counts objects, series and samples; `-Kinds` and `-MaxVms` limit a pilot run; `-Concurrency` sets how many objects post at once. Operations 9.1.1 in the lab refused posts of about 250,000 samples or more with HTTP 500, so posts hold at most `-MaxSamples` samples and a refused one is halved, for the rest of the batch too. For a busy Operations, each post is retried up to 10 times with waits growing from 2 seconds to 60, and objects still refused get two more passes at the end of the run, one at a time; any left after that are reported and picked up by the next run. Five minutes after the last post, the last point of each pushed object's first and last metric is read back: in the lab, Operations sometimes answered posts it then never stored, so such objects are reported as not stored and left for the next run. The summary also counts the objects that had a post refused. In the lab, 30 days for the 1,644 objects with numeric metrics is 224,943 series and 1.94 billion samples, about 550,000 to 590,000 a second at concurrency 4 to 6 (about an hour), and about 6 bytes a sample in the Operations database. Each progress line shows the time, the batch duration and the time left.
 
-After a backfill, run `seed -Refresh`: history is posted with analytics off, and Operations only calculates capacity (time and capacity remaining) once points arrive with analytics on. Until the live feed exists (Phase 6), those figures stay at the last refreshed point.
+After a backfill, run `seed -Refresh`: history is posted with analytics off, and Operations only calculates capacity (time and capacity remaining) once points arrive with analytics on. Without the live feed running, those figures stay at the last refreshed point.
 
 Calibration follows LiveOptics's average and peak exactly, with two edge cases. Where the peak is no higher than the average, the series is flat at the average. Where the average is 0 but the peak is not (LiveOptics rounds small figures down), the series is zero apart from one spike at the object's busiest point, so its mean still rounds to 0. A VM's disk throughput also goes on its first disk, because Operations calculates a VM's total write throughput from its per-disk values and overwrites a pushed total. The average is over the whole week, so a business-hours object runs at about twice its average on weekday working hours (09:00 to 18:00 in `timeZone`) and well under it at night and at weekends.
 
@@ -163,7 +173,9 @@ Calibration follows LiveOptics's average and peak exactly, with two edge cases. 
 | Backfilled | 30 days at 5 minutes: 1,644 objects, 224,943 series, 1.94 billion samples, no failures |
 | LiveOptics check | 1,918 of 1,935 calibrated series (99%) match the LiveOptics average and peak, over 40 random VMs and all 89 hosts; every series has all 8,640 points, and all 44 per-kind samples pass |
 | Capacity | after `seed -Refresh`, Operations calculates time and capacity remaining itself (for example 366 days and 35.8 % on a 16-core host) |
-
+| Container, 23 October 2026 | from the published image on Docker Desktop (Windows), after a full reset:<br>- seed: 2,220 objects;<br>- backfill: 1.95 billion samples in 44 minutes, 0 refused, 0 not stored;<br>- content: 27 symptoms, 5 recommendations, 11 alerts, 4 super metrics, 13 groups, 4 policies, 5 views, 2 reports, 2 dashboards;<br>- the feed runs detached with `--restart unless-stopped` |
+| Alerts | S1, S3 and S8 raise and clear their Synth- alerts. S3 raises datastore latency since every synthetic datastore carries latency keys |
+| Reset | with `-IncludeContent -ApplianceSsh`, removes every seeded object, every Synth- group, policy, alert, symptom, recommendation and super metric, and, over SSH with ops-cli, the views, reports and dashboards |
 Findings that shaped the code:
 
 - **Never push keys Operations computes.** Capacity analytics (time and capacity remaining, recommended size), badges, alert counts, workload scores, reclamation, rightsizing, sustainability and capacity profiles come from Operations. Pushed as zero, they showed as 0 Days and 0 % remaining. The seed plan leaves them out.
