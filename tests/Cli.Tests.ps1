@@ -28,6 +28,12 @@ Describe 'vcfops-synth CLI' {
         $result.Output | Should -Match '^vcfops-synth \d+\.\d+\.\d+'
     }
 
+    It 'adds the image version and short revision when run in the image' {
+        $result = Invoke-Cli @('version') -Environment @{ VCFOPS_SYNTH_IMAGE_VERSION = '0.1.1'; VCFOPS_SYNTH_IMAGE_REVISION = '9cc7e5910218bd9c141b79bba4663ca68486e0c8' }
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -BeLike '*image 0.1.1 (revision 9cc7e59)*'
+    }
+
     It 'validates the example configuration' {
         $result = Invoke-Cli @('config', '-ConfigPath', $script:example)
         $result.ExitCode | Should -Be 0

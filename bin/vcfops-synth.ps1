@@ -538,6 +538,11 @@ try {
 
         'version' {
             Write-Host "vcfops-synth $toolVersion (PowerShell $($PSVersionTable.PSVersion))"
+            if ($env:VCFOPS_SYNTH_IMAGE_VERSION) {
+                $revision = [string]$env:VCFOPS_SYNTH_IMAGE_REVISION
+                if ($revision.Length -gt 7) { $revision = $revision.Substring(0, 7) }
+                Write-Host "image $($env:VCFOPS_SYNTH_IMAGE_VERSION) (revision $revision)"
+            }
             exit 0
         }
 
