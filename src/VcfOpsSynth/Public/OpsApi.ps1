@@ -46,6 +46,8 @@ function Connect-SynthOps {
         Body                 = $body
         TimeoutSec           = $ops.timeoutSeconds
         SkipCertificateCheck = [bool]$ops.skipCertificateCheck
+        # Backfill and feed run with -Verbose for their progress lines; a line per request would bury them.
+        Verbose              = $false
     }
     try {
         $response = Invoke-RestMethod @request
@@ -66,6 +68,8 @@ function Connect-SynthOps {
         Expires              = if ($validity -and $validity.Value) { [DateTimeOffset]::FromUnixTimeMilliseconds([long]$validity.Value) } else { $null }
         TimeoutSec           = $ops.timeoutSeconds
         SkipCertificateCheck = [bool]$ops.skipCertificateCheck
+        # Backfill and feed run with -Verbose for their progress lines; a line per request would bury them.
+        Verbose              = $false
         Config               = $Config
         Password             = $Password
     }
@@ -168,6 +172,7 @@ function Invoke-SynthOpsRequest {
             Headers              = @{ Accept = 'application/json'; Authorization = "OpsToken $($script:OpsSession.Token)" }
             TimeoutSec           = $script:OpsSession.TimeoutSec
             SkipCertificateCheck = $script:OpsSession.SkipCertificateCheck
+            Verbose              = $false
         }
         if ($null -ne $json) {
             $request.ContentType = 'application/json'
