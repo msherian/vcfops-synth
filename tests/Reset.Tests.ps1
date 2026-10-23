@@ -191,6 +191,13 @@ Describe 'Remove-SynthApplianceContent' {
         ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64)) | ConvertFrom-Json).owner | Should -Be 'opsadmin'
     }
 
+    It 'deletes reports and dashboards before the views they use' {
+        $out = @(Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -Confirm:$false)
+        ($out.Kind | Select-Object -Unique) -join ',' | Should -Be 'report,dashboard,view'
+        $script = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../bin/ops-content-delete.py') -Raw
+        $script | Should -Match "for kind in \('report', 'dashboard', 'view'\)"
+    }
+
     It 'sends the appliance script itself, with Unix line endings' {
         $null = Remove-SynthApplianceContent -Prefix 'Synth-' -SshTarget 'root@ops.example.invalid' -Confirm:$false
         $b64 = [regex]::Matches($script:ssh[0].Command, 'echo (\S+) \| base64 -d')[0].Groups[1].Value

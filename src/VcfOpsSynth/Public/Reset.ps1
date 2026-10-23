@@ -334,7 +334,8 @@ function Remove-SynthApplianceContent {
     $names = Get-SynthContentName -Prefix $Prefix
     $send = [ordered]@{ prefix = $Prefix; owner = $Owner; view = @(); report = @(); dashboard = @() }
     $sent = [System.Collections.Generic.List[object]]::new()
-    foreach ($kind in 'View', 'Report', 'Dashboard') {
+    # Reports and dashboards before the views they use: ops-cli will not delete a view a report still uses.
+    foreach ($kind in 'Report', 'Dashboard', 'View') {
         foreach ($name in $names.$kind) {
             $result = [pscustomobject]@{ Kind = $kind.ToLowerInvariant(); Name = $name; Action = ''; Error = $null }
             if (-not $name.StartsWith($Prefix, [StringComparison]::Ordinal) -or $name.StartsWith('-') -or $name.Contains(',')) {

@@ -50,7 +50,8 @@ def load_items(path):
     if owner and (owner.startswith('-') or ',' in owner or ' ' in owner):
         raise ValueError('the owner must not start with - or hold a comma or space')
     items = []
-    for kind in ('view', 'report', 'dashboard'):
+    # Reports and dashboards first: ops-cli will not delete a view a report still uses.
+    for kind in ('report', 'dashboard', 'view'):
         for name in payload.get(kind) or []:
             items.append((kind, str(name)))
     return prefix, owner, items
