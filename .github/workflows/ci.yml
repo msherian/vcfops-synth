@@ -107,6 +107,9 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           docker run --rm "${{ env.IMAGE }}:pr-${{ github.event.number }}" version
+          # A --user uid the image does not know still runs, and ssh finds a passwd entry for it.
+          docker run --rm --user 4242:4242 "${{ env.IMAGE }}:pr-${{ github.event.number }}" version
+          docker run --rm --user 4242:4242 --entrypoint /bin/sh "${{ env.IMAGE }}:pr-${{ github.event.number }}" -c 'grep -v "^exec" /opt/vcfops-synth/bin/docker-entrypoint.sh > /tmp/e.sh && . /tmp/e.sh && ssh -G example.invalid | grep -q "^user synth-user"'
           docker run --rm -v "$PWD/config/lab.example.json:/config/lab.json:ro" "${{ env.IMAGE }}:pr-${{ github.event.number }}" config
           docker run --rm -e VCFOPS_SYNTH_ANON_KEY=ci \
             -v "$PWD/config/lab.example.json:/config/lab.json:ro" \

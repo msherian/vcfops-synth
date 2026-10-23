@@ -17,8 +17,10 @@ LABEL org.opencontainers.image.title="vcfops-synth" \
       org.opencontainers.image.revision="${REVISION}"
 
 # tzdata: the base image has no time zone database, and history follows the lab's local business hours.
+# openssh-client: reset -ApplianceSsh runs ops-cli on the Operations appliance.
+# libnss-wrapper: gives ssh a passwd entry under docker run --user (see bin/docker-entrypoint.sh).
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata openssh-client libnss-wrapper \
  && rm -rf /var/lib/apt/lists/*
 
 # Modules go in the all-users scope so the unprivileged runtime user can load them.
@@ -27,7 +29,7 @@ RUN pwsh -NoLogo -NoProfile -Command " \
         Install-PSResource -Name ImportExcel -Version '${IMPORTEXCEL_VERSION}' -Scope AllUsers -TrustRepository -Quiet" \
  && groupadd --system synth \
  && useradd --system --gid synth --home-dir /home/synth --create-home synth \
- && mkdir -p /config /data \
+ && mkdir -p /config /data /keys \
  && chown synth:synth /config /data
 
 WORKDIR /opt/vcfops-synth
@@ -41,6 +43,7 @@ ENV VCFOPS_SYNTH_CONFIG=/config/lab.json \
 
 USER synth
 VOLUME ["/config", "/data"]
-ENTRYPOINT ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", "/opt/vcfops-synth/bin/vcfops-synth.ps1"]
+# /keys: mount the appliance SSH key read-only at /keys/id_ssh for reset -ApplianceSsh.
+ENTRYPOINT ["/opt/vcfops-synth/bin/docker-entrypoint.sh"]
 # No default arguments, so VCFOPS_SYNTH_COMMAND can choose the command; with neither, the script shows help.
 CMD []

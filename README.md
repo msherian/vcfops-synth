@@ -106,6 +106,8 @@ The CLI takes PowerShell parameters after the command, and every parameter can a
 | `-DryRun` | `VCFOPS_SYNTH_DRY_RUN` | seed, backfill, content, feed, reset | Report only; change nothing |
 | `-Force` | `VCFOPS_SYNTH_FORCE` | reset | Delete for real |
 | `-IncludeContent` | `VCFOPS_SYNTH_INCLUDE_CONTENT` | reset | Also delete the prefixed content |
+| `-ApplianceSsh` | `VCFOPS_SYNTH_APPLIANCE_SSH` | reset | `user@host` of the Operations appliance; with `-IncludeContent`, delete the views, reports and dashboards with ops-cli (key first, else ssh asks for the password) |
+| `-SshKey` | `VCFOPS_SYNTH_SSH_KEY` | reset | Private key for `-ApplianceSsh`; default `/keys/id_ssh` when that file exists (the container's read-only key mount), else ssh's own |
 | `-ImportField` | `VCFOPS_SYNTH_IMPORT_FIELD` | content | Multipart field the content bundle is sent in; default `contentFile` |
 | `-Days` | `VCFOPS_SYNTH_DAYS` | backfill | Days of history; default `backfillDays` |
 | `-Kinds` | `VCFOPS_SYNTH_KINDS` | backfill | Comma-separated resource kinds |
@@ -151,7 +153,7 @@ Progress is saved to `paths.state` after each batch, so a stopped run resumes ov
 
 After a backfill, run `seed -Refresh`: history is posted with analytics off, and Operations only calculates capacity (time and capacity remaining) once points arrive with analytics on. Until the live feed exists (Phase 6), those figures stay at the last refreshed point.
 
-Calibration follows LiveOptics's average and peak exactly, with two edge cases. Where the peak is no higher than the average, the series is flat at the average. Where the average is 0 but the peak is not (LiveOptics rounds small figures down), the series is zero apart from one spike at the object's busiest point, so its mean still rounds to 0. A VM's disk throughput also goes on its first disk, because Operations calculates a VM's total write throughput from its per-disk values and overwrites a pushed total.
+Calibration follows LiveOptics's average and peak exactly, with two edge cases. Where the peak is no higher than the average, the series is flat at the average. Where the average is 0 but the peak is not (LiveOptics rounds small figures down), the series is zero apart from one spike at the object's busiest point, so its mean still rounds to 0. A VM's disk throughput also goes on its first disk, because Operations calculates a VM's total write throughput from its per-disk values and overwrites a pushed total. The average is over the whole week, so a business-hours object runs at about twice its average on weekday working hours (09:00 to 18:00 in `timeZone`) and well under it at night and at weekends.
 
 ## Results in the lab
 
@@ -254,11 +256,18 @@ Each widget shows its view on the `Synth-Estate` group, so it lists the seeded o
 
 `reset` removes what seed created. It finds each planned object by kind and unique identifier, as seed does, never by name, and deletes it only when its `summary|tag` carries the synthetic tag (`seed.tag`, `vcfops-synth-synthetic` by default); an object with a matching identifier but no tag is listed by ID and left alone. VMs go first and the Physical Datacenter last. Afterwards it forgets the backfill progress, the feed's last push and the running scenarios, so a reseed starts clean.
 
-Without `-Force` it only reports what it would delete. `-IncludeContent` also deletes the policies (the tier policies before `Synth-Base`), alerts, symptoms, recommendations, super metrics and custom groups whose names start with the content prefix, `Synth-Estate` included. Views and dashboards cannot be deleted through the API, so delete those in the UI or let the next `content` run overwrite them.
+Without `-Force` it only reports what it would delete. `-IncludeContent` also deletes the policies (the tier policies before `Synth-Base`), alerts, symptoms, recommendations, super metrics and custom groups whose names start with the content prefix, `Synth-Estate` included. Views, reports and dashboards cannot be deleted through the API. Add `-ApplianceSsh root@<ops appliance>` and reset deletes each of them with `ops-cli` on the appliance, in one SSH session that carries `bin/ops-content-delete.py` and the names. It signs in with an SSH key; if the appliance refuses the key, ssh itself asks for the password on the terminal, once, and the password never passes through the toolset. It deletes by the exact names `content` gives them: dashboards for the user `content` imported them as (`operations.username`), and never ops-cli's `-all`, which would delete the built-in ones too. Without `-ApplianceSsh`, reset lists them to delete in the UI and writes their names to `<paths.data>/content-delete.json`. Where the toolset cannot reach the appliance over SSH, copy that file and `bin/ops-content-delete.py` to the appliance and run the script there as root: it makes the same ops-cli calls with the same guards, reports only until given `--apply`, and exits 1 if an item failed. An item already gone shows as `not there`. On VCF Operations 9.1.1 ops-cli itself fails with `NoClassDefFoundError: org/slf4j/LoggerFactory`, because `opscli.jar` asks for `lib/slf4j-api-2.0.17.jar` while the appliance ships 2.0.18; the script then puts the shipped version on the classpath for its own ops-cli calls (`JDK_JAVA_OPTIONS`), and changes nothing on the appliance.
+
+```bash
+scp data/content-delete.json bin/ops-content-delete.py root@<ops appliance>:/tmp/
+ssh root@<ops appliance>
+$VMWARE_PYTHON_BIN /tmp/ops-content-delete.py /tmp/content-delete.json           # report only
+$VMWARE_PYTHON_BIN /tmp/ops-content-delete.py /tmp/content-delete.json --apply   # delete
+```
 
 ```bash
 pwsh ./bin/vcfops-synth.ps1 reset -ConfigPath ./config/lab.json                    # report only
-pwsh ./bin/vcfops-synth.ps1 reset -Force -IncludeContent -ConfigPath ./config/lab.json
+pwsh ./bin/vcfops-synth.ps1 reset -Force -IncludeContent -ApplianceSsh root@ops-a.site-a.example -ConfigPath ./config/lab.json
 ```
 
 ## Development

@@ -117,8 +117,8 @@ function Remove-SynthContent {
         groups; the tier policies go before <prefix>Base, which they inherit.
         Alerts go next, since they refer to symptoms and recommendations.
         Only items whose names (a recommendation's text) start with the prefix
-        are touched. Views and dashboards cannot be listed or deleted through
-        the API, so they stay; the next content run overwrites them by name.
+        are touched. Views, reports and dashboards cannot be deleted through
+        the API; Remove-SynthApplianceContent deletes them with ops-cli.
 
     .PARAMETER Prefix
         The content prefix (lab.json prefix). It must not be empty.
@@ -169,5 +169,210 @@ function Clear-SynthState {
         $temp = "$Path.tmp"
         $all | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $temp -Encoding utf8
         Move-Item -LiteralPath $temp -Destination $Path -Force
+    }
+}
+
+function Get-SynthContentName {
+    <#
+    .SYNOPSIS
+        The names of the views, reports and dashboards the content command publishes.
+
+    .DESCRIPTION
+        Built from the same definitions content uses, so reset can delete them by
+        exact name: neither the API nor ops-cli can list them.
+
+    .PARAMETER Prefix
+        The content prefix (lab.json prefix).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Prefix)
+
+    $content = Get-SynthViewContent -Prefix $Prefix
+    [pscustomobject]@{
+        View      = @($content.Views | ForEach-Object { [string]$_.Name })
+        Report    = @($content.Reports | ForEach-Object { [string]$_.Name })
+        Dashboard = @(Get-SynthDashboardContent -Prefix $Prefix | ForEach-Object { [string]$_.Name })
+    }
+}
+
+function Save-SynthContentDeletePayload {
+    <#
+    .SYNOPSIS
+        Writes the names of the toolset's views, reports and dashboards to a JSON file for bin/ops-content-delete.py.
+
+    .DESCRIPTION
+        For when reset cannot reach the appliance over SSH: copy the file and the
+        script to the appliance and run the script there; it deletes each name
+        with ops-cli. The names come from Get-SynthContentName.
+
+    .PARAMETER Prefix
+        The content prefix (lab.json prefix). It must not be empty.
+
+    .PARAMETER Path
+        The JSON file to write.
+
+    .PARAMETER Owner
+        The user content imported the dashboards as; they are deleted for that user. Without it, for all users.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Prefix,
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Owner
+    )
+    $names = Get-SynthContentName -Prefix $Prefix
+    $payload = [ordered]@{ prefix = $Prefix; owner = $Owner; view = @($names.View); report = @($names.Report); dashboard = @($names.Dashboard) }
+    if ($PSCmdlet.ShouldProcess($Path, 'Write content delete payload')) {
+        $payload | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
+    }
+    $Path
+}
+
+function Invoke-SynthSsh {
+    <#
+    .SYNOPSIS
+        Runs one command on a host over SSH, and returns its exit code and output.
+
+    .DESCRIPTION
+        Without -Interactive, BatchMode stops ssh asking for a password, so a
+        missing key fails at once instead of hanging. With -Interactive, ssh may
+        ask for a password on the terminal itself; the password never passes
+        through PowerShell. A host seen for the first time is added to known_hosts.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$Command,
+        [string]$IdentityFile,
+        [switch]$Interactive
+    )
+    $sshArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=15')
+    if (-not $Interactive) { $sshArgs += @('-o', 'BatchMode=yes') }
+    if ($IdentityFile) { $sshArgs += @('-i', $IdentityFile) }
+    $output = & ssh @sshArgs $Target $Command 2>&1
+    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = (@($output | ForEach-Object { "$_" }) -join "`n").Trim() }
+}
+
+function Test-SynthTerminal {
+    <#
+    .SYNOPSIS
+        True when ssh can ask for a password: a console on Windows, a /dev/tty that opens elsewhere (docker run -t).
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+    if ($IsWindows) { return -not [Console]::IsInputRedirected }
+    try { [IO.File]::Open('/dev/tty', 'Open', 'ReadWrite').Dispose(); $true } catch { $false }
+}
+
+function Resolve-SynthSshKey {
+    <#
+    .SYNOPSIS
+        The private key for -ApplianceSsh: the one given, else the container's key mount when it holds a file.
+
+    .PARAMETER SshKey
+        -SshKey or VCFOPS_SYNTH_SSH_KEY.
+
+    .PARAMETER Default
+        The key mount (docker run -v ~/.ssh/id_ed25519:/keys/id_ssh:ro).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([string]$SshKey, [string]$Default = '/keys/id_ssh')
+    if ($SshKey) { return $SshKey }
+    if (Test-Path -LiteralPath $Default -PathType Leaf) { return $Default }
+    $null
+}
+
+function Remove-SynthApplianceContent {
+    <#
+    .SYNOPSIS
+        Deletes the toolset's views, reports and dashboards on the VCF Operations appliance with ops-cli, over SSH.
+
+    .DESCRIPTION
+        The API cannot delete views, dashboards or report definitions, but ops-cli
+        on the appliance can, by exact name. Each name comes from the toolset's own
+        definitions (Get-SynthContentName) and must start with the prefix. A name
+        that is empty, starts with '-' (ops-cli's -all deletes every item, the
+        built-in ones too) or holds a comma (ops-cli's name separator) is refused.
+
+        All deletes run in one SSH session: bin/ops-content-delete.py and the
+        names are sent with the command and run on the appliance, which applies
+        the same guards and deletes dashboards for -Owner (for all users without
+        it). Sign-in tries the
+        key first; if the appliance refuses it, ssh asks for the password on the
+        terminal, once. The password never passes through PowerShell.
+
+    .PARAMETER Prefix
+        The content prefix (lab.json prefix). It must not be empty.
+
+    .PARAMETER SshTarget
+        user@host of the appliance, for example root@ops-a.example.local.
+
+    .PARAMETER IdentityFile
+        The private key; without it ssh uses its defaults.
+
+    .PARAMETER Owner
+        The user content imported the dashboards as; they are deleted for that user. Without it, for all users.
+
+    .PARAMETER Script
+        bin/ops-content-delete.py, which runs on the appliance.
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Prefix,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$SshTarget,
+        [string]$IdentityFile,
+        [string]$Owner,
+        [string]$Script = (Join-Path $PSScriptRoot '../../../bin/ops-content-delete.py')
+    )
+
+    $names = Get-SynthContentName -Prefix $Prefix
+    $send = [ordered]@{ prefix = $Prefix; owner = $Owner; view = @(); report = @(); dashboard = @() }
+    $sent = [System.Collections.Generic.List[object]]::new()
+    foreach ($kind in 'View', 'Report', 'Dashboard') {
+        foreach ($name in $names.$kind) {
+            $result = [pscustomobject]@{ Kind = $kind.ToLowerInvariant(); Name = $name; Action = ''; Error = $null }
+            if (-not $name.StartsWith($Prefix, [StringComparison]::Ordinal) -or $name.StartsWith('-') -or $name.Contains(',')) {
+                $result.Action = 'refused'; $result.Error = 'The name must start with the prefix and hold no comma.'; $result; continue
+            }
+            if (-not $PSCmdlet.ShouldProcess($name, "Delete $($result.Kind) with ops-cli on $SshTarget")) { $result.Action = 'would delete'; $result; continue }
+            $send[$result.Kind] += $name
+            $sent.Add($result)
+        }
+    }
+    if (-not $sent.Count) { return }
+
+    $b64 = { param([string]$text) [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text)) }
+    $code = & $b64 ((Get-Content -LiteralPath $Script -Raw) -replace "`r`n", "`n")
+    $payload = & $b64 ($send | ConvertTo-Json -Depth 3 -Compress)
+    $command = ". /etc/profile >/dev/null 2>&1; t=`$(mktemp -d) && echo $code | base64 -d > `$t/d.py && echo $payload | base64 -d > `$t/p.json && `${VMWARE_PYTHON_BIN:-python3} `$t/d.py `$t/p.json --apply --jsonl; rc=`$?; rm -rf `$t; exit `$rc"
+
+    $run = Invoke-SynthSsh -Target $SshTarget -IdentityFile $IdentityFile -Command $command
+    # No usable key: let ssh ask for the password on the terminal, if there is one.
+    if ($run.ExitCode -eq 255 -and $run.Output -match 'Permission denied') {
+        if (-not (Test-SynthTerminal)) {
+            $run = [pscustomobject]@{ ExitCode = 255; Output = "$SshTarget did not accept the SSH key, and there is no terminal to ask for the password. Run the container with -it, or with -dit and then docker attach <name>." }
+        }
+        else {
+            Write-Host "SSH key not accepted by $SshTarget; ssh asks for the appliance password. If the container is detached: docker attach <name> (detach again with Ctrl-P Ctrl-Q)."
+            $run = Invoke-SynthSsh -Target $SshTarget -IdentityFile $IdentityFile -Command $command -Interactive
+        }
+    }
+    $byName = @{}
+    foreach ($line in ($run.Output -split "`n")) {
+        if (-not $line.StartsWith('{')) { continue }
+        try { $item = $line | ConvertFrom-Json } catch { continue }
+        $byName["$($item.kind)|$($item.name)"] = $item
+    }
+    foreach ($result in $sent) {
+        $item = $byName["$($result.Kind)|$($result.Name)"]
+        if ($item) { $result.Action = $item.action; $result.Error = $item.error }
+        else { $result.Action = 'failed'; $result.Error = "exit $($run.ExitCode): $($run.Output)" }
+        $result
     }
 }

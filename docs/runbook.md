@@ -54,11 +54,11 @@ On PowerShell (Windows), replace `$PWD/...` with `${PWD}/...` and `$HOME` with `
 
 Read these before pointing the image at a VCF Operations instance:
 
-- **Use a lab, not production.** Seed creates about as many objects as the RVTools export holds, and content publishes groups, policies, alerts, views and reports. Views and dashboards cannot be deleted through the API.
+- **Use a lab, not production.** Seed creates about as many objects as the RVTools export holds, and content publishes groups, policies, alerts, views and reports. Views, reports and dashboards cannot be deleted through the API; reset removes them over SSH with ops-cli (see Clean up).
 - **The holder adapter instance.** Seed creates a VMWARE adapter instance called `vcfops-synth holder - do not start` (`seed.adapterInstance`) and puts the whole synthetic estate under it. It has a vCenter address that cannot resolve and a placeholder credential. **Never start it.** Starting it makes it look for its vCenter, and every object under it is marked not existing. It may show as not collecting; that is expected.
 - **Not existing means deleted after 7 days.** Operations deletes objects that stay not existing once the Deleted Objects window in Global Settings passes (168 hours by default). Do not seed under a real vCenter adapter instance: when it restarts it marks every object its vCenter does not have as not existing, groups empty out, and a week later the objects are gone. Seed warns if the instance you name collects.
 - **Expect retries on a small Operations.** Backfill keeps each post under `-MaxSamples` and halves it when Operations refuses it, retrying with growing waits. The summary lists objects that were refused, or answered but not stored; run backfill again to fill them in.
-- **Clean up with reset.** `reset` reports only; `reset -Force` deletes the seeded objects (found by tag and identifier, never by name), and `-IncludeContent` also deletes the Synth- groups, policies, alerts, symptoms and super metrics. Views, dashboards and the holder instance stay; delete those in the UI.
+- **Clean up with reset.** `reset` reports only; `reset -Force` deletes the seeded objects (found by tag and identifier, never by name), and `-IncludeContent` also deletes the Synth- groups, policies, alerts, symptoms and super metrics. With `-ApplianceSsh root@<ops appliance>` (an SSH key the appliance trusts, or else the password, which ssh asks for once), it also deletes the Synth- views, reports and dashboards with ops-cli; without it, it lists them to delete in the UI and writes `content-delete.json` to the data folder, for `bin/ops-content-delete.py` to delete them on the appliance (see the README's reset section). The holder instance stays.
 - **Report problems** with the command, the summary lines and the Operations version. Leave out host names, object names and credentials.
 
 ### Seed and backfill
@@ -102,7 +102,22 @@ docker run "${opts[@]}" "$img" scenario -Stop all
 ```bash
 docker run "${opts[@]}" "$img" reset                          # report only
 docker run "${opts[@]}" "$img" reset -Force -IncludeContent
+# Views, reports and dashboards too. A key the appliance trusts, mounted read-only at /keys/id_ssh, is used without -SshKey.
+docker run "${opts[@]}" -v "$HOME/.ssh/id_ed25519:/keys/id_ssh:ro" "$img" reset -Force -IncludeContent -ApplianceSsh root@<ops appliance>
+# No trusted key: run in the foreground with -it, and ssh asks for the appliance password.
+docker run -it "${opts[@]}" "$img" reset -Force -IncludeContent -ApplianceSsh root@<ops appliance>
 docker rm -f synth-feed
+```
+
+The key must be readable by the container's user: the `--user` in `opts`, or uid 999 without it. ssh accepts a mounted key whatever its mode when another uid owns it, and the entry point gives a `--user` uid the image does not know a passwd entry, so ssh runs under it.
+
+When the appliance refuses the key, reset prints `SSH key not accepted by ...` and ssh asks for the password on the container's terminal, once; the password never passes through the toolset. That needs a terminal: with `docker run -d` and no `-t`, reset stops with a message saying so instead of waiting. A detached run can still take the password:
+
+```bash
+docker run -dit --name synth-reset "${opts[@]}" "$img" reset -Force -IncludeContent -ApplianceSsh root@<ops appliance>
+docker attach synth-reset      # answer the password prompt; Ctrl-P Ctrl-Q detaches again
+docker logs synth-reset        # the results, once it has finished
+docker rm synth-reset
 ```
 
 ### Name resolution
@@ -195,6 +210,8 @@ What made imports work:
 - **Internal API.** `/internal/...` calls need the `X-Ops-API-use-unsupported: true` header; without it they are refused.
 
 Decision for Phase 5 to 7: groups, super metrics and policies can be fully managed through the API, including reset. Views and dashboards can be pushed through content import but not listed or removed through a supported API. So `reset` must either leave them, overwrite them by name with `force=true` on the next import, or tell the user to delete the `Synth-` items in the UI.
+
+Update 2026-10-22: neither the public nor the internal API (9.1.1) has a delete for views, dashboards or report definitions (DELETE gives 405). `ops-cli` on the appliance (`/usr/lib/vmware-vcops/tools/opscli`) does, by name only and with no list: `view delete <name>[,<name>]`, `report delete <name>[,<name>]`, `dashboard delete <user|all|group:name> <name>`. `-all` deletes every view or report, built-in ones included. Reset uses it over SSH with the names `content` creates.
 
 ### 0.4 RVTools import on vc-mgmt-a
 
