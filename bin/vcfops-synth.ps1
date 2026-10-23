@@ -645,6 +645,11 @@ try {
                 }
                 # Policies after the alerts, so Synth-Base switches on the alerts this run created.
                 $alerts = @((Invoke-SynthOpsRequest -Method Get -Path 'alertdefinitions' -Query @{ pageSize = 5000 }).alertDefinitions)
+                if ($options.DryRun) {
+                    # A dry run created no alerts, so on a fresh Operations the planned ones stand in for the policy preview.
+                    $have = @($alerts | ForEach-Object { [string]$_.name })
+                    $alerts += @($alertContent.Alerts | Where-Object { $_.Name -notin $have } | ForEach-Object { [pscustomobject]@{ id = ''; name = $_.Name; adapterKindKey = $_.AdapterKind; resourceKindKey = $_.ResourceKind } })
+                }
                 $policies = @(Get-SynthPolicyDefinition -Sla $sla -AlertDefinition $alerts -Prefix $config.prefix)
                 $groupIdByKey = @{}
                 foreach ($g in $groups) {
